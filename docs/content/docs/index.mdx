@@ -1,0 +1,67 @@
+---
+title: weebo-stalwart
+description: Manage what lives inside your Stalwart mail server — domains, sending accounts, mailboxes, groups, mailing lists — as Kubernetes resources.
+---
+
+**weebo-stalwart** is a Kubernetes operator for an existing
+[Stalwart](https://stalw.art) mail server (v0.16). Instead of clicking
+through Stalwart's web admin, you describe mail domains, the accounts your
+applications send with, people's mailboxes, groups and mailing lists as
+YAML, apply it to your cluster, and the operator makes Stalwart match — and
+keeps it that way.
+
+Stalwart itself is not deployed by this operator: keep installing it your
+own way, and point the operator at it.
+
+<Cards>
+  <Card
+    title="Start here: Getting started"
+    href="/docs/getting-started"
+    description="Install the operator, connect your Stalwart, declare a domain and give an application an SMTP account in about ten minutes."
+  />
+</Cards>
+
+## What it does for you
+
+- **Your YAML is the source of truth.** A change made by hand in Stalwart's
+  web admin is put back on the next pass, and nothing is sent to Stalwart
+  when it already matches.
+- **It never takes over by surprise.** If an address is already used in
+  Stalwart by something the operator didn't create — by hand, or by a first
+  OpenID Connect login — it reports the clash
+  (`StalwartObjectAlreadyExists`) instead of silently adopting it. Existing
+  objects are brought in on purpose, with the [importer](/docs/guides/migration).
+- **SMTP credentials land in Secrets, not in chat.** An application's
+  sending account gets an App Password, written with the submission
+  settings to a Kubernetes Secret or Vault, ready to mount, rotated on
+  request.
+- **People leave without losing mail.** A mailbox is locked
+  (`state: Locked`), not deleted: every login, App Passwords included, is
+  refused, and the mail stays.
+- **Teams stay in their lane.** A namespace allow-list decides which
+  namespace may create which kinds, in which domains, under which names —
+  checked when you apply, and again before every change.
+
+New to the vocabulary (CR, reconcile, drift…)? Read [Concepts](/docs/concepts)
+first.
+
+## Guides
+
+<Cards>
+  <Card title="Install" href="/docs/guides/install" description="Helm chart, prerequisites, what gets deployed, upgrade and uninstall." />
+  <Card title="Connect a Stalwart" href="/docs/guides/connect-instance" description="The operator's two API keys, the StalwartInstance, and the submission settings it announces." />
+  <Card title="Domains" href="/docs/guides/domains" description="Mail domains, their aliases, catch-all, sub-addressing and DKIM." />
+  <Card title="Service accounts" href="/docs/guides/service-accounts" description="An application's SMTP account, its App Password and where it is written." />
+  <Card title="Mailboxes" href="/docs/guides/accounts" description="People's mailboxes, OpenID Connect sign-in, quotas, and locking an account." />
+  <Card title="Groups and mailing lists" href="/docs/guides/groups-and-lists" description="Shared addresses and lists that relay to their recipients." />
+  <Card title="The allow-list" href="/docs/guides/allow-list" description="Limit which namespace may claim which domains and names." />
+  <Card title="Monitoring & troubleshooting" href="/docs/guides/operations" description="Status, reason codes, deletion, metrics and ArgoCD." />
+  <Card title="Migrate existing objects" href="/docs/guides/migration" description="Link domains and accounts that already exist to their CRs with the importer." />
+</Cards>
+
+## Reference
+
+<Cards>
+  <Card title="CRD reference" href="/docs/crds" description="Every kind, every field, with an interactive manifest builder." />
+  <Card title="Reason codes" href="/docs/reference/reason-codes" description="Every code a condition, an Event or an admission denial carries." />
+</Cards>

@@ -1,0 +1,91 @@
+---
+title: Mailboxes
+description: Give a person a mailbox, let them sign in through OpenID Connect, set its quota, and lock it when they leave.
+---
+
+A `StalwartAccount` is a person's mailbox: an `x:Account` of type `User`
+**without any credential**. Its owner signs in to Stalwart's web interface
+through the instance's OpenID Connect provider, and creates App Passwords
+there for their mail clients. No password goes through Git, Kubernetes or
+Vault.
+
+## Declare one
+
+```yaml
+apiVersion: stalwart.weebo.io/v1alpha1
+kind: StalwartAccount
+metadata:
+  name: alice
+  namespace: mail
+spec:
+  domainRef: { name: example.internal }
+  name: alice                   # = the user's login name at the OpenID Connect provider
+  aliases: [alice.martin]       # alice.martin@example.internal delivers here too
+  quota: 2Gi
+  locale: fr-FR
+  timeZone: Europe/Paris
+```
+
+```bash
+kubectl -n mail get stalwartaccount
+```
+
+```text
+NAME    INSTANCE   ADDRESS                  STATE    READY   REASON       AGE
+alice   main       alice@example.internal   Active   True     Reconciled   1m
+```
+
+The mailbox receives at once. When Alice signs in through OpenID Connect,
+Stalwart finds the account by local-part and domain: `spec.name` must be
+her login name at the provider.
+
+## Who owns what
+
+| Field | Owner |
+| --- | --- |
+| `name`, `domainRef` | the operator. Changing them moves the address: refused without `allow-disruptive-update` |
+| `aliases` | the operator, compared as a set |
+| `quota` | the operator when set (`2Gi` → bytes); unset keeps the server's value |
+| `locale`, `timeZone` | the operator when set; unset keeps the server's value. Both are case-sensitive (`fr-FR`, not `fr-fr`) |
+| `state` | the operator: see [Locking](#locking) |
+| description, group memberships | the OpenID Connect login |
+
+## Locking
+
+When someone leaves, lock the account instead of deleting it:
+
+```yaml
+spec:
+  state: Locked
+```
+
+`Locked` refuses every login — the web interface, IMAP, SMTP submission,
+**App Passwords included** — and sending and delivery. The mailbox, its
+address and its App Passwords are kept, and no other CR can take the
+address. `Active` gives everything back, App Passwords included.
+
+A lock that was applied is `Ready: True` (reason `Reconciled`), with
+`STATE` `Locked`: whatever automates departures can wait for
+`spec.state == Locked`, an up-to-date `observedGeneration` and
+`Ready == True`. A lock that failed stays `Ready: False` with its reason.
+
+Behind the scenes, Stalwart v0.16 has no "disabled" flag: the operator adds
+`authenticate`, `emailSend` and `emailReceive` to the account's disabled
+permissions, and removes only the entries it added on unlock.
+
+## Deletion
+
+`deletionPolicy: Orphan` (the default) leaves the mailbox, and its mail, in
+Stalwart when the CR is deleted. `Delete` deletes the mailbox and its mail:
+set it only when you mean it.
+
+## Accounts created by a first sign-in
+
+If a person signs in through OpenID Connect before their `StalwartAccount`
+exists, Stalwart creates the account itself. The CR then fails with
+`StalwartObjectAlreadyExists`: the operator never adopts by name. Link the
+account to its CR with the [importer](/docs/guides/migration).
+
+## Next
+
+[Groups and mailing lists](/docs/guides/groups-and-lists).

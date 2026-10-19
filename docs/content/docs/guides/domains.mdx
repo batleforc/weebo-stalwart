@@ -1,0 +1,74 @@
+---
+title: Domains
+description: Declare the mail domains of a Stalwart, their aliases, catch-all, sub-addressing and DKIM.
+---
+
+A `StalwartDomain` is one mail domain (`x:Domain`) of an instance. It is
+**cluster-scoped**: a domain is shared by every namespace's accounts, which
+reference it by name (`domainRef`). Creating domains is a cluster admin's
+job; the [allow-list](/docs/guides/allow-list) then says which namespaces
+may create addresses in each.
+
+## Declare one
+
+```yaml
+apiVersion: stalwart.weebo.io/v1alpha1
+kind: StalwartDomain
+metadata:
+  name: example.internal        # the domain name, unless spec.name is set
+spec:
+  aliases: [example.lan]        # other names delivering to the same mailboxes
+  catchAll: postmaster          # unknown addresses go to postmaster@example.internal
+  subAddressing: Enabled        # alice+tag@ → alice@ (default)
+  dkim: Automatic               # Stalwart generates the keys and signs (default)
+```
+
+```bash
+kubectl get stalwartdomain
+```
+
+```text
+NAME               DOMAIN             INSTANCE   READY   REASON       AGE
+example.internal   example.internal   main       True    Reconciled   9s
+```
+
+Accounts, groups and lists name it by `metadata.name`:
+`domainRef: { name: example.internal }`. Until it is `Ready` on their
+instance, they wait (`DomainNotReady`) and follow on their own; a
+`domainRef` naming no domain is `DomainNotFound`.
+
+## Fields
+
+| Field | Compared | Notes |
+| --- | --- | --- |
+| `name` | yes | Defaults to `metadata.name`, lowercased. Renaming moves every address of the domain: refused without `allow-disruptive-update` |
+| `aliases` | as a set | Other domain names, e.g. a legacy name kept for incoming mail |
+| `catchAll` | when set | A local-part; unset leaves Stalwart's catch-all as it is |
+| `subAddressing` | yes | `Enabled` or `Disabled` |
+| `dkim` | yes | `Automatic`: Stalwart generates Ed25519 and RSA keys and signs with them; publish their DNS records yourself. `Manual`: keys are managed outside the operator |
+
+Only what differs is sent: a domain in sync costs one read per reconcile,
+no write.
+
+Stalwart refuses a name whose top-level label it doesn't know: a real
+domain, or a special-use one (`.internal`, `.lan`, `.test`, `.home.arpa`),
+works; an invented one (`.poc`) fails with `RemoteError`. Such a name is
+accepted as an alias of a valid domain.
+
+## Never deleted
+
+`deletionPolicy` only admits `Orphan`, checked three times (the CRD's CEL
+rule, the webhook, the reconcile): deleting a `StalwartDomain` releases the
+CR and leaves the domain, and every mailbox in it, in Stalwart. The
+operator's API key needs no `sysDomainDestroy`. Remove a domain by hand,
+after its accounts.
+
+## Already in Stalwart
+
+The operator never adopts by name: a domain that already exists fails with
+`StalwartObjectAlreadyExists`. Link it to its CR with the
+[importer](/docs/guides/migration).
+
+## Next
+
+[Service accounts](/docs/guides/service-accounts).

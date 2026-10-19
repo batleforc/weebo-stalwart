@@ -1,0 +1,68 @@
+{
+  "apiVersion": "stalwart.weebo.io/v1alpha1",
+  "kind": "StalwartNamespacePolicy",
+  "scope": "Cluster",
+  "description": "Namespace allow-list for the namespaced account kinds, enforced by the\nadmission webhook (CREATE/UPDATE) and re-checked by every reconciler\nbefore any Stalwart call. It governs the CRs bound to a\n`StalwartInstance` (shared by every namespace); a CR bound to a\n`StalwartLocalInstance` is bounded by its namespace's own token instead.\n\nWhile no `StalwartNamespacePolicy` exists, everything is allowed. As\nsoon as one exists, a namespaced CR is only accepted if some `Allow`\nrule matches its namespace and kind and covers the domains and names\nit asks for — and no `Deny` rule matches. Rules of every policy are\npooled; a `Deny` always wins.",
+  "properties": {
+    "rules": {
+      "items": {
+        "properties": {
+          "allowedDomains": {
+            "description": "`StalwartDomain`s (by `metadata.name`) the objects may live in.\nUnset: any. On a `Deny` rule: only deny requests in one of these.",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "allowedKinds": {
+            "items": {
+              "description": "The namespaced kinds a rule may allow.",
+              "enum": [
+                "StalwartServiceAccount",
+                "StalwartAccount",
+                "StalwartGroup",
+                "StalwartMailingList"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "allowedNames": {
+            "description": "Local-parts the objects may claim: an object's name **and** each of\nits aliases must be listed. Unset: any. On a `Deny` rule: deny\nrequests whose name or any alias is listed — the way to reserve\nnames (`postmaster`, `admin`…) for every namespace.",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "effect": {
+            "default": "Allow",
+            "enum": [
+              "Allow",
+              "Deny"
+            ],
+            "type": "string"
+          },
+          "namespaces": {
+            "description": "Namespace names, `*` for all, or a prefix glob like `team-*`.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "allowedKinds",
+          "namespaces"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "rules"
+  ],
+  "type": "object"
+}

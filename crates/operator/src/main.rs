@@ -1,0 +1,281 @@
+//! The `weebo-stalwart-operator` binary: wires the adapters into the
+//! controllers, then runs them on the kit's runtime (telemetry, health,
+//! graceful shutdown, leader election, HTTPS probes).
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use adapters_inbound::controller::{self, Ctx, Shutdown};
+use adapters_inbound::webhook;
+use adapters_outbound::cluster_reader::ClaimStores;
+use adapters_outbound::{
+    JmapGatewayFactory, KubeClusterReader, OperatorInstances, StalwartSecretStoreFactory,
+};
+use api::{
+    Account, Domain, Group, Instance, LocalInstance, MailingList, NamespacePolicy, ServiceAccount,
+};
+use kube::Client;
+use kube::api::ApiResource;
+use kube::runtime::events::{Recorder, Reporter};
+use weebo_kit_runtime::store::spawn_reflector;
+use weebo_kit_runtime::{Health, WatchScope, leader, telemetry, webhook_server};
+
+/// Default `LEASE_NAME`. Keep it across releases: old and new pods of a
+/// rollout must compete for the same lease.
+const DEFAULT_LEASE_NAME: &str = "weebo-stalwart-operator-leader";
+
+// Four workers, whatever the node: tokio's default is one per core, and the
+// chart sets no CPU limit (which the default would follow). Each worker
+// gets its own allocator arena, so on a 16-core node the same load left
+// the idle RSS 14% higher after every create/churn/delete cycle (over the
+// small-cluster budget's 10%; weebo-forgejo measures the same there), and
+// 4 workers is what that budget was measured with. Reconciles wait on the
+// apiserver and Stalwart, not on CPU.
+#[tokio::main(worker_threads = 4)]
+async fn main() -> anyhow::Result<()> {
+    let telemetry = telemetry::init(controller::FIELD_MANAGER)?;
+    let result = match std::env::args().nth(1).as_deref() {
+        // What the image's smoke run calls: no cluster needed.
+        Some("--version") => {
+            println!(
+                "{} {}",
+                controller::FIELD_MANAGER,
+                env!("CARGO_PKG_VERSION")
+            );
+            Ok(())
+        }
+        Some("migrate-instance-ref") => migrate_instance_ref().await,
+        Some(other) => Err(anyhow::anyhow!("unknown command {other:?}")),
+        None => run(&telemetry).await,
+    };
+    if let Err(err) = &result {
+        tracing::error!(error = %err, "operator failed");
+    }
+    telemetry.shutdown();
+    result
+}
+
+/// `migrate-instance-ref [--dry-run]`: rewrites the CRs written when
+/// `spec.instanceRef` was a bare name (`main` → `{name: main}`). Offline:
+/// operator stopped, new CRDs applied, then this, then the operator.
+async fn migrate_instance_ref() -> anyhow::Result<()> {
+    let dry_run = std::env::args().any(|a| a == "--dry-run");
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let client = Client::try_default().await?;
+    let kinds = [
+        ApiResource::erase::<Domain>(&()),
+        ApiResource::erase::<ServiceAccount>(&()),
+        ApiResource::erase::<Account>(&()),
+        ApiResource::erase::<Group>(&()),
+        ApiResource::erase::<MailingList>(&()),
+    ];
+    let migration = weebo_kit_adapters::migrate::migrate_instance_refs(
+        &client,
+        &kinds,
+        controller::FIELD_MANAGER,
+        dry_run,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!(e))?;
+    let verb = if dry_run { "to migrate" } else { "migrated" };
+    for id in &migration.migrated {
+        println!("{verb}: {id}");
+    }
+    println!(
+        "{} {verb}, {} unchanged",
+        migration.migrated.len(),
+        migration.unchanged
+    );
+    Ok(())
+}
+
+async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
+    // `ring` and `aws-lc-rs` are both linked transitively (`kube`'s rustls
+    // vs. reqwest's); rustls refuses to pick a default provider when more
+    // than one is present.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    telemetry.serve_metrics().await?;
+    // `<prefix>_leader`: 1 on the replica holding the lease.
+    leader::register_leader_gauge(controller::FIELD_MANAGER, controller::METRIC_PREFIX);
+
+    let client = Client::try_default().await?;
+    // The whole cluster, or one namespace (with or without the
+    // cluster-scoped kinds) and/or a label selector (the chart's
+    // `watch.*`): an invalid value stops the start here, as does a kind
+    // the scope can't watch.
+    let scope = WatchScope::from_env()?;
+    scope.ensure::<LocalInstance>()?;
+    scope.ensure::<ServiceAccount>()?;
+    scope.ensure::<Account>()?;
+    scope.ensure::<Group>()?;
+    scope.ensure::<MailingList>()?;
+    if scope.cluster_kinds() {
+        scope.ensure::<Instance>()?;
+        scope.ensure::<Domain>()?;
+        scope.ensure::<NamespacePolicy>()?;
+    }
+    tracing::info!(
+        namespace = ?scope.watched_namespace(),
+        selector = ?scope.selector(),
+        cluster_kinds = scope.cluster_kinds(),
+        "watch scope"
+    );
+
+    // The binary is PID 1 in its container: without a handler, SIGTERM
+    // would be ignored and every rollout would wait for the SIGKILL.
+    let shutdown = Shutdown::on_termination()?;
+    let health = Arc::new(Health::default());
+
+    // Every resolution reads the instances: one reflector per kind (no
+    // StalwartInstance without cluster-scoped kinds).
+    let cluster_store = scope.cluster_kinds().then(|| {
+        spawn_reflector(
+            scope.api::<Instance>(client.clone()),
+            &scope,
+            health.clone(),
+            "StalwartInstance reflector",
+        )
+    });
+    let local_store = spawn_reflector(
+        scope.api::<LocalInstance>(client.clone()),
+        &scope,
+        health.clone(),
+        "StalwartLocalInstance reflector",
+    );
+    let instances = Arc::new(
+        OperatorInstances::new(client.clone())
+            .with_scope(
+                scope.watched_namespace().map(String::from),
+                scope.selector().cloned(),
+                scope.cluster_kinds(),
+            )
+            .with_stores(cluster_store, Some(local_store)),
+    );
+
+    // The claims (every CR of the four namespaced kinds, read on each
+    // creation) and the policies (read on every reconcile) come from
+    // memory: from the API, a burst of N creations listed N² objects.
+    let claim_stores = ClaimStores {
+        policies: scope.cluster_kinds().then(|| {
+            spawn_reflector(
+                scope.api::<NamespacePolicy>(client.clone()),
+                &scope,
+                health.clone(),
+                "StalwartNamespacePolicy reflector",
+            )
+        }),
+        service_accounts: Some(spawn_reflector(
+            scope.api::<ServiceAccount>(client.clone()),
+            &scope,
+            health.clone(),
+            "StalwartServiceAccount reflector",
+        )),
+        accounts: Some(spawn_reflector(
+            scope.api::<Account>(client.clone()),
+            &scope,
+            health.clone(),
+            "StalwartAccount reflector",
+        )),
+        groups: Some(spawn_reflector(
+            scope.api::<Group>(client.clone()),
+            &scope,
+            health.clone(),
+            "StalwartGroup reflector",
+        )),
+        mailing_lists: Some(spawn_reflector(
+            scope.api::<MailingList>(client.clone()),
+            &scope,
+            health.clone(),
+            "StalwartMailingList reflector",
+        )),
+    };
+    let cluster = Arc::new(
+        KubeClusterReader::new(client.clone())
+            .with_scope(
+                scope.watched_namespace().map(String::from),
+                scope.selector().cloned(),
+                scope.cluster_kinds(),
+            )
+            .with_stores(claim_stores),
+    );
+
+    let holder_id = std::env::var("HOSTNAME").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+    let ctx = Arc::new(Ctx {
+        client: client.clone(),
+        gateways: Arc::new(JmapGatewayFactory::new(client.clone(), instances.clone())),
+        secrets: Arc::new(StalwartSecretStoreFactory::new(
+            client.clone(),
+            instances.clone(),
+        )),
+        cluster: cluster.clone(),
+        policies: cluster.clone(),
+        instances: instances.clone(),
+        recorder: Recorder::new(
+            client.clone(),
+            Reporter {
+                controller: controller::FIELD_MANAGER.into(),
+                instance: Some(holder_id.clone()),
+            },
+        ),
+        shutdown: shutdown.clone(),
+        health: health.clone(),
+        scope: scope.clone(),
+    });
+
+    // The HTTPS server (probes, the admission webhook, the scope guard) runs on every replica, before and regardless of leadership: a
+    // standby must stay ready, and a leader-only webhook would turn every
+    // failover into an outage. On shutdown it keeps answering while
+    // endpoints drain.
+    let server = webhook_server::spawn(
+        webhook::router(
+            webhook::WebhookState {
+                policies: cluster.clone(),
+                instances: Some(instances),
+                cluster: Some(cluster),
+            },
+            health.clone(),
+            scope,
+        ),
+        health,
+        shutdown.clone(),
+    )
+    .await?;
+
+    // The controllers, in contrast, run on one replica at a time: two
+    // active reconcilers could both create the same remote object.
+    let leadership = tokio::select! {
+        leadership = leader::acquire_leadership(&client, holder_id, DEFAULT_LEASE_NAME) => leadership,
+        () = shutdown.wait() => {
+            server.stopped().await;
+            return Ok(());
+        }
+    };
+
+    tracing::info!("starting controllers");
+    // The cluster-scoped kinds, only when the scope watches them.
+    let cluster_kinds = async {
+        if ctx.scope.cluster_kinds() {
+            tokio::join!(
+                controller::instance::run(client.clone(), ctx.clone()),
+                controller::stalwart_domain::run(client.clone(), ctx.clone()),
+                controller::namespace_policy::run(client.clone(), ctx.clone()),
+            );
+        }
+    };
+    tokio::join!(
+        cluster_kinds,
+        controller::local_instance::run(client.clone(), ctx.clone()),
+        controller::stalwart_service_account::run(client.clone(), ctx.clone()),
+        controller::stalwart_account::run(client.clone(), ctx.clone()),
+        controller::stalwart_group::run(client.clone(), ctx.clone()),
+        controller::stalwart_mailing_list::run(client.clone(), ctx.clone()),
+    );
+    // Every controller returns once the shutdown signal arrived and its
+    // in-flight reconciles finished: hand the lease over right away
+    // instead of making the next leader wait out the TTL.
+    leadership.release().await;
+    // Bounded: the drain started with the signal, long before.
+    let _ = tokio::time::timeout(Duration::from_secs(30), server.stopped()).await;
+    Ok(())
+}

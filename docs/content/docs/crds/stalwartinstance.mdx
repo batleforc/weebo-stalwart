@@ -1,0 +1,52 @@
+---
+title: StalwartInstance
+description: Connection to one Stalwart server (v0.16).
+full: true
+---
+
+- **API version:** `stalwart.weebo.io/v1alpha1`
+- **Scope:** Cluster
+- **Short names:** none
+- **Guide:** [Connect a Stalwart](/docs/guides/connect-instance)
+
+Connection to one Stalwart server (v0.16). Cluster-scoped: an org-wide
+piece of infrastructure, not owned by a namespace (a namespace's own
+server is a `StalwartLocalInstance`). `Ready` tells whether the server
+answers with the token below and speaks a management schema this
+operator release supports.
+
+## Example
+
+```yaml
+apiVersion: stalwart.weebo.io/v1alpha1
+kind: StalwartInstance
+metadata:
+  name: my-instance
+spec:
+  url: http://stalwart.mail.svc:8080
+  tokenSecretRef:
+    name: stalwart-operator-token
+    namespace: mail
+    key: token
+  appPasswordTokenSecretRef:
+    name: stalwart-operator-token
+    namespace: mail
+    key: appPasswordToken
+```
+
+## Spec fields
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `appPasswordTokenSecretRef` | `object` | no |  | A second API key of Stalwart, on the same account as the one above: the one that creates, rotates and revokes the App Passwords of the `StalwartServiceAccount`s (permissions `authenticate`, `impersonate`, `emailSend` and `sysAppPassword*` only). Read on every reconcile of a `StalwartServiceAccount`; unset, those fail with `TokenSecretMissing` (the other kinds don't use it). |
+| `secretStore` | `object` | no | `{"backend":"kubernetes"}` | Default destination of the secrets the CRs bound to this instance emit, when they list no `secretTargets`. Default: a Kubernetes `Secret`. |
+| `submission` | `object` | no | `{"host":"stalwart.mail.svc.cluster.local","port":587,"security":"starttls"}` | The submission service the emitted credentials announce. |
+| `tls` | `object` | no | `{"insecureSkipVerify":false}` | TLS verification of the connection above: a private CA to trust (`tls.caSecretRef`), or `tls.insecureSkipVerify`. Default: the platform trust store. |
+| `tokenSecretRef` | `object` | yes |  | An API key of Stalwart, sent as `Authorization: Bearer`. Read on every reconcile: rotating it needs no restart. |
+| `url` | `string` | yes |  | Base URL of the Stalwart HTTP listener, e.g. `http://stalwart.mail.svc:8080`. Management goes through JMAP, `POST <url>/jmap` (session `GET <url>/jmap/session`); `<url>/api` only serves the schema, whose hash identifies the server's version. |
+
+## Build a manifest
+
+Answer the questions and fill in the fields: the YAML preview updates as you type, ready to copy or download and `kubectl apply`.
+
+<CrdForm kind="StalwartInstance" />

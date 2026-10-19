@@ -1,0 +1,278 @@
+---
+title: Connect a Stalwart
+description: Point the operator at a Stalwart with its two API keys, choose where secrets are written, and set the submission settings it announces.
+---
+
+A `StalwartInstance` tells the operator which Stalwart to manage and how to
+authenticate. Every other CR uses it.
+
+## Before you begin
+
+- The operator is [installed](/docs/guides/install).
+- You have an **administrator** account on a Stalwart v0.16 (v0.16.25 to
+  v0.16.27), to create the operator's two API keys.
+
+## Connect
+
+<Steps>
+<Step>
+
+### Create the API keys
+
+The operator speaks Stalwart's JMAP management API (`POST <url>/jmap`) with
+an API key, sent as `Authorization: Bearer`, and creates the service
+accounts' App Passwords with a second, narrow one. Both belong to the
+operator's account (`weebo-stalwart`, which needs no password). Create them
+as an administrator, or from a bootstrap Job that runs with the recovery
+admin, with `x:ApiKey/set {"accountId": <the operator's account>, …}`. See
+[The API key](#the-api-key) and [The App Password key](#the-app-password-key)
+for the permissions each needs.
+
+</Step>
+<Step>
+
+### Store it in a Secret
+
+```bash
+kubectl -n mail create secret generic stalwart-operator-token \
+  --from-literal=token=<the-api-key> \
+  --from-literal=appPasswordToken=<the-app-password-key>
+```
+
+The keys are read again on every reconcile, so you can rotate them by
+updating this Secret, with no restart. Until the Secret exists, the instance is
+`Ready: False` (`TokenSecretMissing`) and turns `Ready` on its own once it
+appears — a bootstrap Job may write it after the instance is applied.
+
+</Step>
+<Step>
+
+### Create the StalwartInstance
+
+```yaml
+apiVersion: stalwart.weebo.io/v1alpha1
+kind: StalwartInstance
+metadata:
+  name: main
+spec:
+  url: http://stalwart.mail.svc:8080   # the HTTP listener, not /jmap
+  tokenSecretRef:
+    name: stalwart-operator-token
+    namespace: mail
+    key: token
+  appPasswordTokenSecretRef:            # needed by StalwartServiceAccounts only
+    name: stalwart-operator-token
+    namespace: mail
+    key: appPasswordToken
+  tls:                                  # only for https:// with a private CA
+    caSecretRef:
+      name: internal-ca
+      namespace: mail
+      key: ca.crt                       # PEM
+  submission:                           # what the emitted credentials announce
+    host: stalwart.mail.svc.cluster.local
+    port: 587
+    security: starttls                  # starttls | tls | none
+```
+
+</Step>
+<Step>
+
+### Check it
+
+```bash
+kubectl get stalwartinstance main
+```
+
+```text
+NAME   URL                             READY   REASON       AGE
+main   http://stalwart.mail.svc:8080   True    Reconciled   12s
+```
+
+`Ready` means Stalwart answers with this key (`GET /jmap/session`) and
+serves a management schema this operator release supports
+(`GET /api/schema`, compared by hash). When it is `False`, the reason says
+why:
+
+| Reason | Fix |
+| --- | --- |
+| `TokenSecretMissing` | Check the Secret's name, namespace and key (a `StalwartServiceAccount`: also `appPasswordTokenSecretRef`) |
+| `InvalidSpec` | The `url` can't be parsed |
+| `InstanceUnreachable` | Check the URL, DNS, network policies and TLS (`tls.caSecretRef` for a private CA) |
+| `InstanceUnauthorized` | Stalwart refused the key (401/403): it was revoked, or it lacks permissions |
+| `UnsupportedStalwartVersion` | The server's schema hash is not one this release was tested against: run a supported Stalwart, or upgrade the operator |
+
+</Step>
+</Steps>
+
+## The API key
+
+A Stalwart API key can't grant what its account lacks, and its account
+needs what the management methods check. In practice the operator's key
+holds:
+
+- the User role's permissions (the JMAP session and the schema need them),
+  including `sysApiKey*`, `sysAppPassword*` and `jmapEmail*`;
+- `sysDomain{Get,Query,Create,Update}` — no `sysDomainDestroy`: a
+  `StalwartDomain` is never deleted by the operator;
+- `sysAccount{Get,Query,Create,Update,Destroy}`;
+- `sysMailingList{Get,Query,Create,Update,Destroy}`.
+
+No `impersonate`, and no server setting is ever written by the operator.
+Without an OpenID Connect default directory, be aware that
+`sysAccountUpdate` sets any account's password: whoever holds the key can
+then sign in as any user and read their mailbox. Under an `Oidc` default
+directory, Stalwart refuses every password write, the key's included.
+Treat it like the admin password; see
+[Security model](/docs/guides/security).
+
+## The App Password key
+
+A [service account](/docs/guides/service-accounts) authenticates with an
+App Password, never a password: under an OpenID Connect default directory
+(on the community edition, it serves every domain) a password login fails
+and Stalwart refuses to store one. Creating an App Password on another
+account takes `impersonate`, which the main key must never hold — with its
+`jmap*` permissions, it would read every mailbox. Hence a second key, in
+`permissions: Replace` with exactly:
+
+- `authenticate`, `impersonate`, `emailSend`;
+- `sysAppPassword{Create,Get,Update,Destroy,Query}`.
+
+It reads no mail and changes no account. It can, however, create an App
+Password on any account — and so **send as anyone** on submission — see
+[Security model](/docs/guides/security). Each App Password it creates is
+described `weebo-stalwart`, visible in the account's web interface.
+
+Set it as `appPasswordTokenSecretRef` (same form as `tokenSecretRef`; on a
+`StalwartLocalInstance`, a labelled Secret of its namespace). It is read
+only when a `StalwartServiceAccount` is reconciled: without it, those fail
+with `TokenSecretMissing`, and the other kinds work as before.
+
+## The submission settings
+
+The credentials a [service account](/docs/guides/service-accounts) writes
+carry `host`, `port` and `security`: they come from the instance's
+`submission`, which defaults to `stalwart.mail.svc.cluster.local:587` with
+`STARTTLS`. The operator never connects there itself; set them to what your
+applications must reach.
+
+## One instance or several
+
+Every namespaced CR and every domain has an optional
+`instanceRef: { name: main }`. Without it, the cluster's **only**
+`StalwartInstance` is used (else, for a namespaced CR, the only
+`StalwartLocalInstance` of its namespace). With zero instances, those CRs
+report `InstanceNotFound`; with several, `InstanceAmbiguous`, so set
+`instanceRef` on each of them.
+
+Once resolved, the instance is recorded in `status.instance` and a CR
+**never moves**: re-pointing `instanceRef` elsewhere leaves the CR
+`Ready: False` (`InstanceBindingChanged`) without touching anything. To
+move a CR to another instance, delete it (with `deletionPolicy: Orphan`, or
+the `force-orphan` annotation) and create it again. An account's domain must
+be `Ready` on the same instance as the account (`DomainNotReady` otherwise).
+
+## A namespace's own instance
+
+A `StalwartLocalInstance` is a `StalwartInstance` owned by a namespace: its
+API key (and TLS CA) live in a `Secret` of that namespace, and only the CRs
+of that namespace use it, unless its `sharedWith` lists other namespaces
+(`namespaces`, `namespaceSelector`) or accepts cluster-scoped objects (a
+`StalwartDomain`). CRs bound to it are not governed by the
+[allow-list](/docs/guides/allow-list) — the namespace's own key bounds what
+they can do — and write their secrets as Kubernetes `Secret`s only (Vault
+targets need a `StalwartInstance`: the operator's Vault identity is shared
+by every namespace).
+
+The key's `Secret` must carry the label
+`stalwart.weebo.io/instance-token: "true"`. The operator reads it with its
+own rights, not with those of whoever created the instance: without that
+consent, anyone allowed to create a `StalwartLocalInstance` could have the
+operator send any `Secret` of the namespace to a URL of their choosing. An
+unlabelled Secret leaves the instance `Ready: False`
+(`TokenSecretNotAllowed`).
+
+```bash
+kubectl -n team-a create secret generic stalwart-token --from-literal=token=<api-key>
+kubectl -n team-a label secret stalwart-token stalwart.weebo.io/instance-token=true
+```
+
+```yaml
+apiVersion: stalwart.weebo.io/v1alpha1
+kind: StalwartLocalInstance
+metadata:
+  name: main
+  namespace: team-a
+spec:
+  url: http://stalwart.team-a.svc:8080
+  tokenSecretRef:
+    name: stalwart-token
+    key: token
+  appPasswordTokenSecretRef:    # the same label rule applies to its Secret
+    name: stalwart-token
+    key: appPasswordToken
+```
+
+`instanceRef` finds the instance by name: an operator watching the whole
+cluster tries the `StalwartInstance` first, then the `StalwartLocalInstance`
+of the CR's namespace; one limited to a namespace (`watch.namespace`) only
+uses its local instances. `kind` (`Instance` or `LocalInstance`) and
+`namespace` pin one:
+
+```yaml
+spec:
+  instanceRef:
+    name: main
+    kind: LocalInstance
+```
+
+## Where secrets go
+
+Only [service accounts](/docs/guides/service-accounts) generate credentials.
+Each one chooses where they go with `secretTargets`. When it lists none, the
+instance's `secretStore.backend` decides; the default, `kubernetes`, is a
+Secret named after the CR, in its namespace.
+
+### When to use Vault
+
+Use Vault when credentials must reach workloads outside this cluster, or
+when your policy keeps secrets out of etcd. The Vault connection is declared
+once on the instance:
+
+```yaml
+spec:
+  secretStore:
+    vault:
+      address: https://vault.example.com:8200
+      mount: secret                # a KV version 2 engine
+      pathPrefix: weebo-stalwart   # the default
+      kubernetesAuthRole: weebo-stalwart
+      caSecretRef: { name: vault-ca, namespace: weebo-stalwart, key: ca.crt }
+```
+
+A service account's Vault target is always named `smtp`, without `path`: it
+is written to `<pathPrefix>/<namespace>/smtp`. That's the only path the
+operator's Vault role needs, so its policy can stay that narrow:
+
+```bash
+vault policy write weebo-stalwart - <<'EOF'
+path "secret/data/weebo-stalwart/+/smtp" { capabilities = ["create", "read", "update", "delete"] }
+path "secret/metadata/weebo-stalwart/+/smtp" { capabilities = ["read", "delete"] }
+EOF
+
+vault write auth/kubernetes/role/weebo-stalwart \
+  bound_service_account_names=weebo-stalwart \
+  bound_service_account_namespaces=weebo-stalwart \
+  token_policies=weebo-stalwart
+```
+
+The operator logs in with its own ServiceAccount through Vault's
+[Kubernetes auth method](https://developer.hashicorp.com/vault/docs/auth/kubernetes),
+with no static Vault token. Since the Vault target has a fixed name, a CR
+listing no `secretTargets` is only accepted when the instance's default
+backend is `kubernetes`.
+
+## Next
+
+[Domains](/docs/guides/domains).

@@ -1,0 +1,57 @@
+---
+title: StalwartNamespacePolicy
+description: >-
+  Namespace allow-list for the namespaced account kinds, enforced by the
+  admission webhook (CREATE/UPDATE) and re-checked by every reconciler before
+  any Stalwart call.
+full: true
+---
+
+- **API version:** `stalwart.weebo.io/v1alpha1`
+- **Scope:** Cluster
+- **Short names:** none
+- **Guide:** [The allow-list](/docs/guides/allow-list)
+
+Namespace allow-list for the namespaced account kinds, enforced by the
+admission webhook (CREATE/UPDATE) and re-checked by every reconciler
+before any Stalwart call. It governs the CRs bound to a
+`StalwartInstance` (shared by every namespace); a CR bound to a
+`StalwartLocalInstance` is bounded by its namespace's own token instead.
+
+While no `StalwartNamespacePolicy` exists, everything is allowed. As
+soon as one exists, a namespaced CR is only accepted if some `Allow`
+rule matches its namespace and kind and covers the domains and names
+it asks for — and no `Deny` rule matches. Rules of every policy are
+pooled; a `Deny` always wins.
+
+## Example
+
+```yaml
+apiVersion: stalwart.weebo.io/v1alpha1
+kind: StalwartNamespacePolicy
+metadata:
+  name: my-namespacepolicy
+spec:
+  rules:
+    - namespaces:
+        - forgejo
+      allowedKinds:
+        - StalwartServiceAccount
+      allowedDomains:
+        - example.internal
+      allowedNames:
+        - forgejo
+        - noreply
+```
+
+## Spec fields
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `rules` | `object[]` | yes |  |  |
+
+## Build a manifest
+
+Answer the questions and fill in the fields: the YAML preview updates as you type, ready to copy or download and `kubectl apply`.
+
+<CrdForm kind="StalwartNamespacePolicy" />

@@ -1,0 +1,51 @@
+---
+title: StalwartGroup
+description: 'A group (x:Account of type Group): a shared address delivering to its members.'
+full: true
+---
+
+- **API version:** `stalwart.weebo.io/v1alpha1`
+- **Scope:** Namespaced
+- **Short names:** none
+- **Guide:** [Groups and mailing lists](/docs/guides/groups-and-lists#groups)
+
+A group (`x:Account` of type `Group`): a shared address delivering to
+its members. Its members are not managed here: the OpenID Connect login
+sets them from the provider's `groups` claim, where `name` must appear.
+
+The OpenID Connect login also creates a group for every name of the
+claim the first time a member logs in: a `StalwartGroup` declared after
+that fails (`StalwartObjectAlreadyExists`) until
+`weebo-stalwart-importer` links it to the existing group — declare it
+before the group is published in the claim.
+
+## Example
+
+```yaml
+apiVersion: stalwart.weebo.io/v1alpha1
+kind: StalwartGroup
+metadata:
+  name: my-group
+  namespace: team-a
+spec:
+  domainRef:
+    name: example.internal
+  name: devs
+```
+
+## Spec fields
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `aliases` | `string[]` | no |  | Other local-parts delivering to the group, in the same domain. Compared as a set. |
+| `deletionPolicy` | `string` | no | `"Orphan"` | `Orphan` (default): deleting the CR leaves the group in Stalwart. `Delete`: deleting the CR deletes the group (refused by Stalwart, and retried, while accounts are still members). |
+| `domainRef` | `object` | yes |  | The `StalwartDomain` (cluster-scoped, by `metadata.name`) the group's address and aliases are in. It must be `Ready` on the same instance. |
+| `instanceRef` | `object` | no |  | The `StalwartInstance` (or `StalwartLocalInstance`) the group lives on. Unset: the only `StalwartInstance`, else the only `StalwartLocalInstance` of the namespace. |
+| `name` | `string` | no |  | The local-part of the group's address, lowercased: the group's name in the OpenID Connect provider's `groups` claim. Defaults to the CR's `metadata.name`. Changing it moves the address: only applied with the annotation `stalwart.weebo.io/allow-disruptive-update: "true"`. |
+| `quota` | `object` | no |  | Disk quota of the group's shared mailbox (`10Gi`). Unset: no opinion. |
+
+## Build a manifest
+
+Answer the questions and fill in the fields: the YAML preview updates as you type, ready to copy or download and `kubectl apply`.
+
+<CrdForm kind="StalwartGroup" />

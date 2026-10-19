@@ -1,0 +1,42 @@
+[
+  {
+    "kind": "StalwartInstance",
+    "singular": "stalwartinstance",
+    "scope": "Cluster"
+  },
+  {
+    "kind": "StalwartLocalInstance",
+    "singular": "stalwartlocalinstance",
+    "scope": "Namespaced"
+  },
+  {
+    "kind": "StalwartNamespacePolicy",
+    "singular": "stalwartnamespacepolicy",
+    "scope": "Cluster"
+  },
+  {
+    "kind": "StalwartDomain",
+    "singular": "stalwartdomain",
+    "scope": "Cluster"
+  },
+  {
+    "kind": "StalwartServiceAccount",
+    "singular": "stalwartserviceaccount",
+    "scope": "Namespaced"
+  },
+  {
+    "kind": "StalwartAccount",
+    "singular": "stalwartaccount",
+    "scope": "Namespaced"
+  },
+  {
+    "kind": "StalwartGroup",
+    "singular": "stalwartgroup",
+    "scope": "Namespaced"
+  },
+  {
+    "kind": "StalwartMailingList",
+    "singular": "stalwartmailinglist",
+    "scope": "Namespaced"
+  }
+]

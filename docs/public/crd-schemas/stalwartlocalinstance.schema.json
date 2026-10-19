@@ -1,0 +1,176 @@
+{
+  "apiVersion": "stalwart.weebo.io/v1alpha1",
+  "kind": "StalwartLocalInstance",
+  "scope": "Namespaced",
+  "description": "Connection to one Stalwart server (v0.16), owned by a namespace: its\ntoken is that namespace's, and only its objects use it unless\n`sharedWith` says otherwise. What an operator limited to one namespace\nuses. Objects bound to it are not governed by `StalwartNamespacePolicy`\n(the namespace's own token bounds them) and write their secrets as\nKubernetes `Secret`s only: the operator's Vault identity is shared by\nevery namespace. `Ready` tells whether the server answers with the\ntoken below and speaks a supported management schema.",
+  "properties": {
+    "appPasswordTokenSecretRef": {
+      "description": "A second API key of Stalwart, on the same account as the one above,\nin a `Secret` of this namespace with the same label: the one that\ncreates, rotates and revokes the App Passwords of the\n`StalwartServiceAccount`s (permissions `authenticate`,\n`impersonate`, `emailSend` and `sysAppPassword*` only). Read on\nevery reconcile of a `StalwartServiceAccount`; unset, those fail\nwith `TokenSecretMissing` (the other kinds don't use it).",
+      "nullable": true,
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "name"
+      ],
+      "type": "object"
+    },
+    "sharedWith": {
+      "description": "Other namespaces (or cluster-scoped objects) allowed to use this\ninstance — and its token. Unset: this namespace only.",
+      "nullable": true,
+      "properties": {
+        "clusterScoped": {
+          "description": "Cluster-scoped objects may use this instance.",
+          "type": "boolean"
+        },
+        "namespaceSelector": {
+          "description": "Namespaces whose labels match this selector may use this instance.\nAn empty selector (`{}`) matches every namespace: the instance —\nand the token it holds — is then shared with the whole cluster.",
+          "nullable": true,
+          "properties": {
+            "matchExpressions": {
+              "description": "matchExpressions is a list of label selector requirements. The requirements are ANDed.",
+              "items": {
+                "description": "A label selector requirement is a selector that contains values, a key, and an operator that relates the key and values.",
+                "properties": {
+                  "key": {
+                    "description": "key is the label key that the selector applies to.",
+                    "type": "string"
+                  },
+                  "operator": {
+                    "description": "operator represents a key's relationship to a set of values. Valid operators are In, NotIn, Exists and DoesNotExist.",
+                    "type": "string"
+                  },
+                  "values": {
+                    "description": "values is an array of string values. If the operator is In or NotIn, the values array must be non-empty. If the operator is Exists or DoesNotExist, the values array must be empty. This array is replaced during a strategic merge patch.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "key",
+                  "operator"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "matchLabels": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels map is equivalent to an element of matchExpressions, whose key field is \"key\", the operator is \"In\", and the values array contains only \"value\". The requirements are ANDed.",
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "namespaces": {
+          "description": "Namespaces whose objects may use this instance.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "submission": {
+      "default": {
+        "host": "stalwart.mail.svc.cluster.local",
+        "port": 587,
+        "security": "starttls"
+      },
+      "description": "The submission service the emitted credentials announce.",
+      "properties": {
+        "host": {
+          "default": "stalwart.mail.svc.cluster.local",
+          "description": "Host name of the submission service.",
+          "type": "string"
+        },
+        "port": {
+          "default": 587,
+          "description": "Port of the submission service.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "security": {
+          "default": "starttls",
+          "description": "Transport security a client must use.",
+          "enum": [
+            "starttls",
+            "tls",
+            "none"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "tls": {
+      "default": {
+        "insecureSkipVerify": false
+      },
+      "description": "TLS verification of the connection above; the CA `Secret` lives in\nthis namespace.",
+      "properties": {
+        "caSecretRef": {
+          "description": "Optional custom CA certificate (a PEM bundle under `key`) to verify\nthe instance's TLS with, read from a `Secret` of the instance's own\nnamespace. Added on top of the platform trust store.",
+          "nullable": true,
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "name"
+          ],
+          "type": "object"
+        },
+        "insecureSkipVerify": {
+          "default": false,
+          "description": "Skip certificate verification entirely — insecure, intended only for\nthrowaway/self-signed instances. Prefer `caSecretRef` below.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "tokenSecretRef": {
+      "description": "An API key of Stalwart (sent as `Authorization: Bearer`), in a\n`Secret` of this namespace labelled\n`stalwart.weebo.io/instance-token: \"true\"` (without the label the\noperator doesn't read it). Read on every reconcile: rotating it\nneeds no restart.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "name"
+      ],
+      "type": "object"
+    },
+    "url": {
+      "description": "Base URL of the Stalwart HTTP listener, e.g.\n`http://stalwart.mail.svc:8080` (JMAP at `<url>/jmap`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "tokenSecretRef",
+    "url"
+  ],
+  "type": "object"
+}

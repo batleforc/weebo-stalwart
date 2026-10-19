@@ -1,0 +1,120 @@
+version: "3"
+
+# A disposable Stalwart for the live suites (`task test:live-stalwart`),
+# local dev and CI: the image the operator is tested against, a RocksDB
+# store in the container, the recovery admin from the environment, and the
+# operator's account and API key bootstrapped the way weebo-si's
+# `stalwart-bootstrap` Job does (RFC 0001, D17, D24): a domain for the
+# account, the account `weebo-stalwart` (role Admin, no password: an OIDC
+# default directory would refuse one), then its two API keys, both created
+# by the recovery admin with `accountId` and `permissions: Replace`: the
+# main one with deploy/stalwart/operator-api-key-permissions.json, the App
+# Password one with deploy/stalwart/app-password-key-permissions.json.
+# Then a `submission` listener on 587 (STARTTLS; the image has 25 and 465
+# only), bound by a restart.
+#
+# RFC 0001 Q1: observed on v0.16.27, `authenticate` is all the session,
+# `POST /jmap` and `/api/schema` need — but a key can't grant a permission
+# it lacks, and creating a `User` account grants the User role's: the key
+# holds those 258 permissions (sys{Domain,Account,MailingList}* minus
+# sysDomainDestroy, plus the User role's own, sysApiKey*/sysAppPassword* of
+# its own account and jmap* included; no `impersonate`, no settings).
+#
+# RFC 0001 D24: the second key holds `impersonate` (an App Password on
+# another account needs it) but no jmap* nor sysAccount*: it creates,
+# lists and revokes the service accounts' App Passwords, nothing else.
+#
+# Writes .stalwart-test.env (STALWART_URL, STALWART_TOKEN,
+# STALWART_APP_PASSWORD_TOKEN, STALWART_ADMIN, STALWART_SUBMISSION,
+# STALWART_SMTP).
+
+vars:
+  IMAGE: docker.io/stalwartlabs/stalwart:v0.16.27
+  NAME: weebo-stalwart-test
+  PORT: '{{.STALWART_PORT | default "18080"}}'
+  # SMTP for the SMTP-level live tests (RFC 0001 Q4, Q8): submission
+  # (587, STARTTLS, the image's self-signed certificate) and MX (25,
+  # delivery to a local recipient).
+  SUBMISSION_PORT: '{{.STALWART_SUBMISSION_PORT | default "10587"}}'
+  SMTP_PORT: '{{.STALWART_SMTP_PORT | default "10025"}}'
+  # Dev-only credentials of a throwaway container.
+  ADMIN_PASSWORD: dev-only-recovery-password-change-me
+  # Stalwart refuses a domain whose top-level label it doesn't know:
+  # `.internal` is a special-use one it accepts.
+  DOMAIN: weebo-test.internal
+
+tasks:
+  container:start:
+    desc: "Run a disposable Stalwart v0.16.27 (docker/podman, ENGINE=podman, localhost:18080, SMTP 10587/10025) with the operator's account and its two API keys; writes .stalwart-test.env for the live tests"
+    vars:
+      ENGINE: '{{.ENGINE | default "docker"}}'
+    cmds:
+      - "{{.ENGINE}} rm -f {{.NAME}} >/dev/null 2>&1 || true"
+      - |
+        set -eu
+        # The store only: without config.json the server starts in
+        # bootstrap mode, where every management object is refused.
+        cfg="{{.ROOT_DIR}}/target/stalwart-test"
+        mkdir -p "$cfg"
+        echo '{"@type":"RocksDb","path":"/var/lib/stalwart/data"}' > "$cfg/config.json"
+        chmod 0755 "$cfg"; chmod 0644 "$cfg/config.json"
+        {{.ENGINE}} run -d --name {{.NAME}} -p 127.0.0.1:{{.PORT}}:8080 \
+          -p 127.0.0.1:{{.SUBMISSION_PORT}}:587 -p 127.0.0.1:{{.SMTP_PORT}}:25 \
+          -v "$cfg/config.json:/etc/stalwart/config.json:ro,Z" \
+          -e STALWART_RECOVERY_ADMIN='admin:{{.ADMIN_PASSWORD}}' \
+          {{.IMAGE}} >/dev/null
+      - |
+        for i in $(seq 1 60); do
+          curl -fsS -o /dev/null -u 'admin:{{.ADMIN_PASSWORD}}' http://127.0.0.1:{{.PORT}}/jmap/session && exit 0  # gitleaks:allow (dev-only throwaway admin)
+          sleep 1
+        done
+        echo "Stalwart did not answer within 60s: {{.ENGINE}} logs {{.NAME}}" >&2
+        exit 1
+      - |
+        set -eu
+        url=http://127.0.0.1:{{.PORT}}
+        jmap() { # <user:password> <method> <arguments>
+          curl -fsS -u "$1" -H 'Content-Type: application/json' "$url/jmap" \
+            -d "{\"using\":[\"urn:ietf:params:jmap:core\",\"urn:stalwart:jmap\"],\"methodCalls\":[[\"$2\",$3,\"0\"]]}"
+        }
+        field() { sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p"; }
+        admin='admin:{{.ADMIN_PASSWORD}}'
+        domain=$(jmap "$admin" x:Domain/set '{"create":{"d":{"name":"{{.DOMAIN}}","dkimManagement":{"@type":"Manual"}}}}' | field id)
+        [ -n "$domain" ] || { echo "creating {{.DOMAIN}} failed" >&2; exit 1; }
+        account=$(jmap "$admin" x:Account/set "{\"create\":{\"a\":{\"@type\":\"User\",\"name\":\"weebo-stalwart\",\"domainId\":\"$domain\",\"roles\":{\"@type\":\"Admin\"}}}}" | field id)
+        [ -n "$account" ] || { echo "creating the operator's account failed" >&2; exit 1; }
+        # An API key belongs to the account `accountId` names: both are
+        # created by the recovery admin, the account having no password.
+        # A key can't grant more than it holds, and creating a `User`
+        # account grants the User role's permissions: hence the long list
+        # of the main key.
+        key() { # <description> <permissions file>
+          perms=$(tr -d ' \n' < "{{.ROOT_DIR}}/deploy/stalwart/$2")
+          jmap "$admin" x:ApiKey/set \
+            "{\"accountId\":\"$account\",\"create\":{\"k\":{\"description\":\"$1\",\"permissions\":{\"@type\":\"Replace\",\"permissions\":$perms}}}}" | field secret
+        }
+        token=$(key weebo-stalwart operator-api-key-permissions.json)
+        [ -n "$token" ] || { echo "creating the operator's API key failed" >&2; exit 1; }
+        app_token=$(key weebo-stalwart-app-passwords app-password-key-permissions.json)
+        [ -n "$app_token" ] || { echo "creating the App Password key failed" >&2; exit 1; }
+        # The image listens on 25 (smtp) and 465 (submissions) only: the
+        # instance's default submission (587, STARTTLS) needs a listener,
+        # bound at the next start (weebo-si must create it too).
+        listener=$(jmap "$admin" x:NetworkListener/set '{"create":{"s":{"name":"submission","bind":{"[::]:587":true},"protocol":"smtp","tlsImplicit":false}}}' | field id)
+        [ -n "$listener" ] || { echo "creating the submission listener failed" >&2; exit 1; }
+        {{.ENGINE}} restart {{.NAME}} >/dev/null
+        for i in $(seq 1 60); do
+          curl -fsS -o /dev/null -u "$admin" "$url/jmap/session" 2>/dev/null && break
+          sleep 1
+        done
+        printf 'STALWART_URL=%s\nSTALWART_TOKEN=%s\nSTALWART_APP_PASSWORD_TOKEN=%s\nSTALWART_ADMIN=%s\nSTALWART_SUBMISSION=%s\nSTALWART_SMTP=%s\n' \
+          "$url" "$token" "$app_token" "$admin" 127.0.0.1:{{.SUBMISSION_PORT}} 127.0.0.1:{{.SMTP_PORT}} \
+          > "{{.ROOT_DIR}}/.stalwart-test.env"
+        echo "wrote .stalwart-test.env (domain {{.DOMAIN}} id $domain, account $account)"
+
+  container:stop:
+    desc: "Remove the disposable Stalwart container"
+    vars:
+      ENGINE: '{{.ENGINE | default "docker"}}'
+    cmds:
+      - "{{.ENGINE}} rm -f {{.NAME}}"

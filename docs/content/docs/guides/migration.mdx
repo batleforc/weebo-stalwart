@@ -1,0 +1,139 @@
+---
+title: Migrate existing objects
+description: Link domains, accounts, groups and lists that already exist in Stalwart to the CRs describing them, with the importer.
+---
+
+The operator never takes over a Stalwart object on its own. A CR whose
+address (or domain name) is already taken in Stalwart stays `Ready: False`
+with reason `StalwartObjectAlreadyExists`, so nothing is adopted by
+accident: not an account made by hand in the web admin, not one created by
+a first OpenID Connect sign-in, not a domain set up before the operator.
+
+To bring such an object under a CR, use **`weebo-stalwart-importer`**. You
+give it the CRs, as you would commit them to Git; it finds the object each
+one describes **by name**, and records that object's id in the CR's status.
+The operator then manages that exact object instead of trying to create a
+new one.
+
+## Before you begin
+
+- The operator is [installed](/docs/guides/install) and a `StalwartInstance`
+  is [connected](/docs/guides/connect-instance).
+- An API key that can read domains, accounts and lists: the operator's.
+- For `--apply`, a kube context allowed to create the CRs and patch their
+  `status`.
+- If a [`StalwartNamespacePolicy`](/docs/guides/allow-list) exists, it must
+  allow the CRs you link, as for any CR.
+
+## What it links
+
+| CR | Found by | Checked |
+| --- | --- | --- |
+| `StalwartDomain` | its domain name | |
+| `StalwartServiceAccount`, `StalwartAccount` | `name` in the domain of `domainRef` | an account of type `User` |
+| `StalwartGroup` | `name` in the domain of `domainRef` | an account of type `Group` |
+| `StalwartMailingList` | `name@domain` | a mailing list |
+
+Domains are linked first: an account's `domainRef` must name a
+`StalwartDomain` in the same input, or one already linked in the cluster.
+An object another CR already owns on the same server is refused
+(`RemoteObjectClaimed`).
+
+## Run the importer
+
+The importer ships in both operator images:
+
+```bash
+export STALWART_TOKEN=<api-key>
+
+importer() {
+  docker run --rm -i -e STALWART_TOKEN \
+    -v "$HOME/.kube/config:/kubeconfig:ro" -e KUBECONFIG=/kubeconfig \
+    -v "$PWD:/work:ro" -w /work \
+    --entrypoint /usr/local/bin/weebo-stalwart-importer \
+    ghcr.io/batleforc/weebo-stalwart-operator:<version> "$@"
+}
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--url` / `STALWART_URL` | | Stalwart base URL, as in `StalwartInstance.spec.url` |
+| `--token` / `STALWART_TOKEN` | | The API key |
+| `--file`, `-f` (repeatable) | | The CRs to link, as YAML; `-` reads stdin |
+| `--namespace`, `-n` | `default` | Namespace of the namespaced CRs that name none |
+| `--apply` | off | Apply the CRs in the current kube context and seed their status. Without it, the CRs are printed, `status` included |
+| `--force` | off | With `--apply`: also take over CRs that already exist but own nothing yet (`StalwartObjectAlreadyExists`) — make sure their operator isn't creating the object at the same time |
+| `--ca-file` / `STALWART_CA_FILE` | | A PEM bundle trusted on top of the system roots |
+| `--insecure-skip-verify` | off | Skip TLS verification (testing only) |
+
+## Link safely: review, apply, then commit
+
+`status` is a subresource: `kubectl apply` and GitOps tools never write it.
+That's why the link happens in the cluster, once, before the manifests go to
+Git (or before your GitOps tool syncs them).
+
+<Steps>
+<Step>
+
+### Review
+
+Print what would be linked, without touching the cluster:
+
+```bash
+importer --url http://stalwart.mail.svc:8080 -f mail.yaml
+```
+
+Each CR comes back with the `status.remoteId` and `status.address` it would
+get. A CR that can't be linked (no such object, wrong type, already owned)
+is reported on stderr, and the command fails.
+
+</Step>
+<Step>
+
+### Apply
+
+```bash
+importer --url http://stalwart.mail.svc:8080 -f mail.yaml --apply
+```
+
+```text
+3 linked, 0 already linked, 0 failed
+```
+
+Each CR is applied paused (annotation `stalwart.weebo.io/import-pending`),
+its status seeded with the object's id, its address and its instance, then
+unpaused: the operator never sees it without its id, so it can't create a
+duplicate. Running it again is harmless: linked CRs are skipped.
+
+</Step>
+<Step>
+
+### Commit
+
+Commit the same `mail.yaml` (without `status`) to Git. From then on the
+operator reads each object by its id, compares it with the spec and writes
+only what differs: review the first `DriftCorrected` Events, they show what
+the spec changed.
+
+</Step>
+</Steps>
+
+## Service accounts get an App Password
+
+A linked `StalwartServiceAccount` is given a fresh
+`stalwart.weebo.io/rotate-secret` nonce (`import-<timestamp>`): its first
+reconcile creates an App Password of the operator's and writes it to the
+CR's targets, over what another tool wrote there (Terraform, a script), so
+**remove that tool's resource first** — for a Vault target, the resource
+writing `<pathPrefix>/<namespace>/smtp` — and restart the application once
+the new credentials are in place. The operator never touches the account's
+password: it stops working once Stalwart's default directory is OpenID
+Connect (switch it after the import), or remove it in the web interface.
+
+## Accounts and groups made by OpenID Connect
+
+A person who signed in before their `StalwartAccount` existed already has
+an account, created by Stalwart's OpenID Connect login; so does every group
+of the provider's `groups` claim once a member signed in. Write their CRs,
+then link them as above. To avoid it for groups, declare the
+`StalwartGroup` before publishing the group in the claim.

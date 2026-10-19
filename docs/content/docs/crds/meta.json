@@ -1,0 +1,14 @@
+{
+  "title": "CRD reference",
+  "pages": [
+    "index",
+    "stalwartinstance",
+    "stalwartlocalinstance",
+    "stalwartnamespacepolicy",
+    "stalwartdomain",
+    "stalwartserviceaccount",
+    "stalwartaccount",
+    "stalwartgroup",
+    "stalwartmailinglist"
+  ]
+}

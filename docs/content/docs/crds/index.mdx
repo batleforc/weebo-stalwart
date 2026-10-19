@@ -1,0 +1,20 @@
+---
+title: CRD reference
+description: Every kind the operator adds, its fields, and an interactive manifest builder.
+---
+
+Each page lists a kind's `spec` fields, shows a minimal example, and has a
+form that builds a ready-to-apply manifest. These pages are generated from
+the CRDs themselves, so they always match the installed version. For the
+ideas behind the fields, start with [Concepts](/docs/concepts).
+
+| Kind | Scope | Description |
+| --- | --- | --- |
+| [`StalwartInstance`](/docs/crds/stalwartinstance) | Cluster | Connection to one Stalwart server (v0.16). |
+| [`StalwartLocalInstance`](/docs/crds/stalwartlocalinstance) | Namespaced | Connection to one Stalwart server (v0.16), owned by a namespace: its token is that namespace's, and only its objects use it unless `sharedWith` says otherwise. |
+| [`StalwartNamespacePolicy`](/docs/crds/stalwartnamespacepolicy) | Cluster | Namespace allow-list for the namespaced account kinds, enforced by the admission webhook (CREATE/UPDATE) and re-checked by every reconciler before any Stalwart call. |
+| [`StalwartDomain`](/docs/crds/stalwartdomain) | Cluster | A mail domain of a Stalwart instance (`x:Domain`). |
+| [`StalwartServiceAccount`](/docs/crds/stalwartserviceaccount) | Namespaced | A sending account of an application (`x:Account` of type `User`, authenticating with an App Password): the operator creates the account without any password, has Stalwart generate an App Password for it (granting `authenticate` and `emailSend` only) with the instance's `appPasswordTokenSecretRef` key, and writes the SMTP submission settings to `secretTargets` (`host`, `port`, `security`, `username` — the address —, `password` — the App Password —, `from`). |
+| [`StalwartAccount`](/docs/crds/stalwartaccount) | Namespaced | A person's mailbox (`x:Account` of type `User`), without any credential: its owner logs in through the instance's OpenID Connect provider, which finds the account by local-part and domain, and creates App Passwords in the web interface. |
+| [`StalwartGroup`](/docs/crds/stalwartgroup) | Namespaced | A group (`x:Account` of type `Group`): a shared address delivering to its members. |
+| [`StalwartMailingList`](/docs/crds/stalwartmailinglist) | Namespaced | A mailing list (`x:MailingList`): an address relaying every message to its recipients — addresses, or the `StalwartAccount`s of this namespace. |

@@ -1,0 +1,52 @@
+---
+title: StalwartMailingList
+description: >-
+  A mailing list (x:MailingList): an address relaying every message to its
+  recipients — addresses, or the StalwartAccounts of this namespace.
+full: true
+---
+
+- **API version:** `stalwart.weebo.io/v1alpha1`
+- **Scope:** Namespaced
+- **Short names:** none
+- **Guide:** [Groups and mailing lists](/docs/guides/groups-and-lists#mailing-lists)
+
+A mailing list (`x:MailingList`): an address relaying every message to
+its recipients — addresses, or the `StalwartAccount`s of this
+namespace. Compared on every reconcile, recipients as a set, and
+written only when it drifted.
+
+## Example
+
+```yaml
+apiVersion: stalwart.weebo.io/v1alpha1
+kind: StalwartMailingList
+metadata:
+  name: my-mailinglist
+  namespace: team-a
+spec:
+  domainRef:
+    name: example.internal
+  name: team
+  recipients:
+    - accountRef:
+        name: alice
+    - address: bob@example.com
+```
+
+## Spec fields
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `aliases` | `string[]` | no |  | Other local-parts of the list, in the same domain. Compared as a set. |
+| `deletionPolicy` | `string` | no | `"Delete"` | `Delete` (default): deleting the CR deletes the list. `Orphan`: the list is left in Stalwart. |
+| `domainRef` | `object` | yes |  | The `StalwartDomain` (cluster-scoped, by `metadata.name`) the list's address and aliases are in. It must be `Ready` on the same instance. |
+| `instanceRef` | `object` | no |  | The `StalwartInstance` (or `StalwartLocalInstance`) the list lives on. Unset: the only `StalwartInstance`, else the only `StalwartLocalInstance` of the namespace. |
+| `name` | `string` | no |  | The local-part of the list's address, lowercased. Defaults to the CR's `metadata.name`. Changing it moves the address: only applied with the annotation `stalwart.weebo.io/allow-disruptive-update: "true"`. |
+| `recipients` | `object[]` | no | `[]` | Who receives the list's messages. Compared as a set of addresses, whatever their case. |
+
+## Build a manifest
+
+Answer the questions and fill in the fields: the YAML preview updates as you type, ready to copy or download and `kubectl apply`.
+
+<CrdForm kind="StalwartMailingList" />

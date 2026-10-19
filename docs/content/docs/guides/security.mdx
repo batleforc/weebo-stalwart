@@ -1,0 +1,169 @@
+---
+title: Security model
+description: What the operator may do in the cluster and in Stalwart, the rules that bound it, and how to fence it with RBAC and a NetworkPolicy.
+---
+
+The operator holds two Stalwart API keys — one that manages every account
+of the server, one that creates the service accounts' App Passwords — and
+writes Secrets in the namespaces its CRs live in. This page
+explains why, and what stops a namespace from turning that power against
+another one.
+
+## Trust boundaries
+
+| Who | Can | Bounded by |
+| --- | --- | --- |
+| Cluster admins | Create the cluster-scoped kinds: instances, domains, namespace policies | Kubernetes RBAC |
+| Application teams | Create namespaced kinds in their namespaces: local instances, service accounts, mailboxes, groups, mailing lists | RBAC, **and** the [allow-list](/docs/guides/allow-list) for what is bound to a shared `StalwartInstance` |
+| Whatever automates mailboxes (a provisioning tool, a link from the identity provider) | Create and lock `StalwartAccount`s in its namespace | The same RBAC and allow-list as any client: it has no right on Stalwart itself |
+| The operator | Manage domains, accounts and lists in Stalwart; create the service accounts' App Passwords; read the instances' key Secrets, write the credentials it publishes | Its two API keys' permissions, its ClusterRole, and the rules below |
+
+Give each application namespace an `Allow` rule listing exactly its names
+and aliases (`forgejo: [forgejo, noreply]`), and reserve infrastructure
+names (`postmaster`, `abuse`, `admin`…) with a `Deny` rule for every kind.
+The chart's `rbac.namespacedExample` renders a Role with exactly the
+namespaced kinds for a team.
+
+### One owner per address
+
+An address (an account's, a group's, a list's, or an alias) on a Stalwart
+server is owned by **one** CR: a second CR — in any namespace, through any
+instance pointing at the same server — asking for it is refused with
+`RemoteObjectClaimed`, before any call to Stalwart. An object that exists in
+Stalwart without a CR is never adopted by name either
+(`StalwartObjectAlreadyExists`): only the [importer](/docs/guides/migration),
+run by an admin, links it.
+
+### A CR never changes instance
+
+Once resolved, a CR's instance is recorded in `status.instance`. A
+`StalwartInstance` created later under the name a CR uses doesn't take it
+over (`InstanceBindingChanged`), and the remote object is only ever read by
+the id the CR recorded, after checking it still answers with the address
+the CR confirmed — an id reused after a server reset is taken as gone,
+never patched.
+
+### A local instance only uses a Secret labelled for it
+
+The API key `Secret`s of a `StalwartLocalInstance` (`tokenSecretRef`,
+`appPasswordTokenSecretRef`) must carry
+`stalwart.weebo.io/instance-token: "true"`: without that consent, anyone
+allowed to create a local instance could have the operator send any Secret
+of the namespace to a URL of their choosing (`TokenSecretNotAllowed`).
+
+## The operator's API keys
+
+Their Stalwart permissions are listed in
+[The API key](/docs/guides/connect-instance#the-api-key) and
+[The App Password key](/docs/guides/connect-instance#the-app-password-key).
+Neither writes a server setting; the main one has no `sysDomainDestroy` and
+no `impersonate`, the second one no `jmap*` and no `sysAccount*`. They are
+two because creating an App Password on another account takes
+`impersonate`, and `impersonate` next to the main key's `jmap*` would read
+every mailbox.
+
+Blast radius of leaked keys or a compromised operator:
+
+- create, change, lock or delete accounts, groups and lists;
+- **send as anyone**: the second key creates an App Password on any
+  account, administrators included, granting at most `authenticate` and
+  `emailSend` — enough to submit mail on 587 under that identity, not to
+  read it. Each one is described `weebo-stalwart`, visible in the account's
+  web interface;
+- **read no mailbox** under an OpenID Connect default directory: Stalwart
+  then refuses every password write, the main key's `sysAccountUpdate`
+  included. Without it (an internal default directory), `sysAccountUpdate`
+  can set any account's password, so sign in as any user and read their
+  mailbox: the `Oidc` default directory is part of the security model, not
+  only of the login.
+
+Keep the keys' Secret readable by the operator only.
+
+## The operator's RBAC
+
+| Resource | Verbs | Why |
+| --- | --- | --- |
+| The `stalwart.weebo.io` kinds (+ `/status`, `/finalizers`) | get, list, watch, update, patch | Its own API, cluster-wide: namespaced kinds live in any namespace |
+| `secrets` | get, create, update, patch, delete | Read the instances' API keys and CAs, write the service accounts' credentials. **Never list or watch** |
+| `events.k8s.io` events | create, patch | An Event on every `Ready` transition and every failure |
+| `namespaces` | get | The labels of a namespace using a local instance shared through a `namespaceSelector` |
+| `coordination.k8s.io` leases, release namespace only | get, create, update, patch | Leader election (a Role, not a ClusterRole) |
+
+### Where a CR may write Secrets
+
+- A service account may only write `secretTargets` into **its own
+  namespace**; another namespace is refused by the admission webhook and
+  again by the reconciler.
+- Its Vault target is named `smtp`, without `path`: always
+  `<pathPrefix>/<namespace>/smtp`. Vault values record their owner in the
+  KV custom metadata and are never overwritten nor deleted by another CR.
+- The operator only overwrites or deletes a Secret it **owns**: one
+  annotated `stalwart.weebo.io/owner: StalwartServiceAccount/<namespace>/<name>`
+  naming the CR. A target naming an existing Secret it doesn't own fails
+  with `SecretTargetFailed`.
+- App Passwords and API keys are never logged, never put in a status or an
+  Event: the status only carries `lastRotation` (the nonce served) and
+  `address`. The JMAP client marks the `Authorization` header sensitive.
+
+## Admission webhook
+
+- The `failurePolicy` is `Fail`, on the `stalwart.weebo.io` kinds only:
+  while no replica answers, they can't be created or updated. Being unable
+  to create an account during an outage is better than one created outside
+  the policy, and these CRs are on no Pod's path. Don't switch it to
+  `Ignore`; the reconcilers would still refuse disallowed CRs, but only
+  after they're stored.
+- It checks the allow-list, the spec's own rules (aliases are local-parts,
+  a Vault target is `smtp`, a domain is `Orphan`), the secret targets, and —
+  with `watch.labelSelector` — that a managed CR doesn't leave the
+  operator's selector (`LeavesWatchScope`).
+- It never sees deletes, so revoking access never blocks cleanup.
+
+## Network policy
+
+`networkPolicy.enabled=true` renders a NetworkPolicy for the operator pods.
+
+**Ingress** is limited to the webhook port (8443) and, when metrics are on,
+the metrics port (9090). Restrict `webhookFrom` when you know the API
+server's source address, and `metricsFrom` to your Prometheus namespace.
+
+**Egress** is only restricted with `networkPolicy.egress.enabled=true`. The
+operator then needs, and you must list:
+
+| Destination | Value | Default |
+| --- | --- | --- |
+| Cluster DNS | `egress.dns` | kube-dns in `kube-system`, port 53 UDP/TCP |
+| The API server | `egress.apiServer.to` | **required**: the `kubernetes` endpoints' addresses |
+| Every Stalwart a `StalwartInstance` points at | `egress.stalwart` | none |
+| Vault, if a secret store uses it | `egress.vault` | none |
+| Anything else (OTLP collector, …) | `egress.extra` | none |
+
+```yaml
+networkPolicy:
+  enabled: true
+  egress:
+    enabled: true
+    apiServer:
+      # kubectl get endpoints kubernetes -o jsonpath='{.subsets[*].addresses[*].ip}'
+      to:
+        - ipBlock: { cidr: 10.0.0.10/32 }
+    stalwart:
+      - to:
+          - namespaceSelector:
+              matchLabels: { kubernetes.io/metadata.name: mail }
+        ports:
+          - { port: 8080, protocol: TCP }
+```
+
+The operator only reaches Stalwart's HTTP listener: never SMTP, IMAP or
+anything outside the cluster. A blocked Stalwart shows up as
+`InstanceUnreachable` on the `StalwartInstance`.
+
+## Supply chain
+
+Release images and charts are built in GitHub Actions, carry an SBOM and SLSA
+provenance, are scanned by Grype, and are signed keylessly with cosign.
+
+## Next
+
+[Migrate existing objects](/docs/guides/migration).

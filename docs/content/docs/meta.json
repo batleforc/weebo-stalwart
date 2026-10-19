@@ -1,0 +1,15 @@
+{
+  "title": "weebo-stalwart",
+  "pages": [
+    "index",
+    "getting-started",
+    "concepts",
+    "---Guides---",
+    "...guides",
+    "---Reference---",
+    "...crds",
+    "reference",
+    "---Contributing---",
+    "...contributing"
+  ]
+}

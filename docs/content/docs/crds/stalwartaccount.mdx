@@ -1,0 +1,66 @@
+---
+title: StalwartAccount
+description: >-
+  A person's mailbox (x:Account of type User), without any credential: its owner
+  logs in through the instance's OpenID Connect provider, which finds the
+  account by local-part and domain, and creates App Passwords in the web
+  interface.
+full: true
+---
+
+- **API version:** `stalwart.weebo.io/v1alpha1`
+- **Scope:** Namespaced
+- **Short names:** none
+- **Guide:** [Mailboxes](/docs/guides/accounts)
+
+A person's mailbox (`x:Account` of type `User`), without any
+credential: its owner logs in through the instance's OpenID Connect
+provider, which finds the account by local-part and domain, and creates
+App Passwords in the web interface. The name, aliases, quota, locale and
+time zone are the operator's; the description and the group memberships
+are left to the OpenID Connect login.
+
+`state: Locked` keeps the mailbox, its address and its App Passwords,
+but refuses every login (App Passwords included), sending and delivery;
+`Active` gives them back. A locked account that reached that state is
+`Ready: True`.
+
+The account is read by `status.remoteId`, never adopted by name: an
+address already taken in Stalwart (an account the OpenID Connect login
+created first) fails (`StalwartObjectAlreadyExists`) until
+`weebo-stalwart-importer` links it to this CR.
+
+## Example
+
+```yaml
+apiVersion: stalwart.weebo.io/v1alpha1
+kind: StalwartAccount
+metadata:
+  name: my-account
+  namespace: team-a
+spec:
+  domainRef:
+    name: example.internal
+  name: alice
+  quota: 2Gi
+```
+
+## Spec fields
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `aliases` | `string[]` | no |  | Other local-parts delivering to this mailbox, in the same domain. Compared as a set. |
+| `deletionPolicy` | `string` | no | `"Orphan"` | `Orphan` (default): deleting the CR leaves the mailbox in Stalwart. `Delete`: deleting the CR deletes the mailbox and its mail. |
+| `domainRef` | `object` | yes |  | The `StalwartDomain` (cluster-scoped, by `metadata.name`) the account's address and aliases are in. It must be `Ready` on the same instance. |
+| `instanceRef` | `object` | no |  | The `StalwartInstance` (or `StalwartLocalInstance`) the account lives on. Unset: the only `StalwartInstance`, else the only `StalwartLocalInstance` of the namespace. |
+| `locale` | `string` | no |  | Locale of the account (`fr-FR`). Unset: no opinion. |
+| `name` | `string` | no |  | The local-part of the account's address (`<name>@<domain>`), lowercased: the user's login name at the OpenID Connect provider. Defaults to the CR's `metadata.name`. Changing it moves the address: only applied with the annotation `stalwart.weebo.io/allow-disruptive-update: "true"`. |
+| `quota` | `object` | no |  | Disk quota of the mailbox (`2Gi`). Unset: no opinion, the server's value is kept. |
+| `state` | `string` | no | `"Active"` | `Active`, or `Locked`: logins (App Passwords included), sending and delivery refused, the mailbox, its address and its App Passwords kept. |
+| `timeZone` | `string` | no |  | Time zone of the account (`Europe/Paris`). Unset: no opinion. |
+
+## Build a manifest
+
+Answer the questions and fill in the fields: the YAML preview updates as you type, ready to copy or download and `kubectl apply`.
+
+<CrdForm kind="StalwartAccount" />

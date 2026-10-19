@@ -1,0 +1,84 @@
+{
+  "apiVersion": "stalwart.weebo.io/v1alpha1",
+  "kind": "StalwartGroup",
+  "scope": "Namespaced",
+  "description": "A group (`x:Account` of type `Group`): a shared address delivering to\nits members. Its members are not managed here: the OpenID Connect login\nsets them from the provider's `groups` claim, where `name` must appear.\n\nThe OpenID Connect login also creates a group for every name of the\nclaim the first time a member logs in: a `StalwartGroup` declared after\nthat fails (`StalwartObjectAlreadyExists`) until\n`weebo-stalwart-importer` links it to the existing group — declare it\nbefore the group is published in the claim.",
+  "properties": {
+    "aliases": {
+      "description": "Other local-parts delivering to the group, in the same domain.\nCompared as a set.",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 32,
+      "type": "array"
+    },
+    "deletionPolicy": {
+      "default": "Orphan",
+      "description": "`Orphan` (default): deleting the CR leaves the group in Stalwart.\n`Delete`: deleting the CR deletes the group (refused by Stalwart, and\nretried, while accounts are still members).",
+      "enum": [
+        "Delete",
+        "Orphan"
+      ],
+      "type": "string"
+    },
+    "domainRef": {
+      "description": "The `StalwartDomain` (cluster-scoped, by `metadata.name`) the\ngroup's address and aliases are in. It must be `Ready` on the same\ninstance.",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "instanceRef": {
+      "description": "The `StalwartInstance` (or `StalwartLocalInstance`) the group lives\non. Unset: the only `StalwartInstance`, else the only\n`StalwartLocalInstance` of the namespace.",
+      "nullable": true,
+      "properties": {
+        "kind": {
+          "description": "The kind of instance a reference designates.",
+          "enum": [
+            "Instance",
+            "LocalInstance"
+          ],
+          "nullable": true,
+          "type": "string"
+        },
+        "name": {
+          "description": "`metadata.name` of the instance.",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Namespace of a `LocalInstance`. Defaults to this object's own;\nrequired on a cluster-scoped object. Another namespace's local\ninstance must share itself with this one (its `sharedWith`).",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object",
+      "x-kubernetes-validations": [
+        {
+          "message": "namespace only applies to kind LocalInstance",
+          "rule": "!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'"
+        }
+      ]
+    },
+    "name": {
+      "description": "The local-part of the group's address, lowercased: the group's name\nin the OpenID Connect provider's `groups` claim. Defaults to the\nCR's `metadata.name`. Changing it moves the address: only applied\nwith the annotation `stalwart.weebo.io/allow-disruptive-update:\n\"true\"`.",
+      "nullable": true,
+      "type": "string"
+    },
+    "quota": {
+      "description": "Disk quota of the group's shared mailbox (`10Gi`). Unset: no\nopinion.",
+      "nullable": true
+    }
+  },
+  "required": [
+    "domainRef"
+  ],
+  "type": "object"
+}

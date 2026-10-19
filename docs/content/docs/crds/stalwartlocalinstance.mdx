@@ -1,0 +1,57 @@
+---
+title: StalwartLocalInstance
+description: >-
+  Connection to one Stalwart server (v0.16), owned by a namespace: its token is
+  that namespace's, and only its objects use it unless sharedWith says
+  otherwise.
+full: true
+---
+
+- **API version:** `stalwart.weebo.io/v1alpha1`
+- **Scope:** Namespaced
+- **Short names:** none
+- **Guide:** [A namespace's own instance](/docs/guides/connect-instance#a-namespaces-own-instance)
+
+Connection to one Stalwart server (v0.16), owned by a namespace: its
+token is that namespace's, and only its objects use it unless
+`sharedWith` says otherwise. What an operator limited to one namespace
+uses. Objects bound to it are not governed by `StalwartNamespacePolicy`
+(the namespace's own token bounds them) and write their secrets as
+Kubernetes `Secret`s only: the operator's Vault identity is shared by
+every namespace. `Ready` tells whether the server answers with the
+token below and speaks a supported management schema.
+
+## Example
+
+```yaml
+apiVersion: stalwart.weebo.io/v1alpha1
+kind: StalwartLocalInstance
+metadata:
+  name: my-localinstance
+  namespace: team-a
+spec:
+  url: http://stalwart.mail.svc:8080
+  tokenSecretRef:
+    name: stalwart-token
+    key: token
+  appPasswordTokenSecretRef:
+    name: stalwart-token
+    key: appPasswordToken
+```
+
+## Spec fields
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `appPasswordTokenSecretRef` | `object` | no |  | A second API key of Stalwart, on the same account as the one above, in a `Secret` of this namespace with the same label: the one that creates, rotates and revokes the App Passwords of the `StalwartServiceAccount`s (permissions `authenticate`, `impersonate`, `emailSend` and `sysAppPassword*` only). Read on every reconcile of a `StalwartServiceAccount`; unset, those fail with `TokenSecretMissing` (the other kinds don't use it). |
+| `sharedWith` | `object` | no |  | Other namespaces (or cluster-scoped objects) allowed to use this instance — and its token. Unset: this namespace only. |
+| `submission` | `object` | no | `{"host":"stalwart.mail.svc.cluster.local","port":587,"security":"starttls"}` | The submission service the emitted credentials announce. |
+| `tls` | `object` | no | `{"insecureSkipVerify":false}` | TLS verification of the connection above; the CA `Secret` lives in this namespace. |
+| `tokenSecretRef` | `object` | yes |  | An API key of Stalwart (sent as `Authorization: Bearer`), in a `Secret` of this namespace labelled `stalwart.weebo.io/instance-token: "true"` (without the label the operator doesn't read it). Read on every reconcile: rotating it needs no restart. |
+| `url` | `string` | yes |  | Base URL of the Stalwart HTTP listener, e.g. `http://stalwart.mail.svc:8080` (JMAP at `<url>/jmap`). |
+
+## Build a manifest
+
+Answer the questions and fill in the fields: the YAML preview updates as you type, ready to copy or download and `kubectl apply`.
+
+<CrdForm kind="StalwartLocalInstance" />

@@ -1,0 +1,89 @@
+---
+title: The allow-list
+description: Limit which namespace may create which account kinds, in which domains, under which names.
+---
+
+A shared `StalwartInstance` serves every namespace, with one API key. The
+`StalwartNamespacePolicy` decides what each namespace may ask of it: which
+kinds, in which domains, with which local-parts. Without it, any namespace
+allowed by RBAC to create a `StalwartAccount` could claim
+`admin@example.internal`.
+
+## How it is evaluated
+
+- **While no `StalwartNamespacePolicy` exists, everything is allowed.** As
+  soon as one exists, a namespaced CR is only accepted if some `Allow` rule
+  matches it, and no `Deny` rule does.
+- A rule matches when its `namespaces` match the CR's namespace (exact
+  names, `*`, or a prefix glob like `team-*`) and its `allowedKinds` list
+  the CR's kind.
+- An `Allow` rule then has to **cover** what the CR asks for: its domain
+  (the `StalwartDomain`'s `metadata.name`) must be in `allowedDomains`, and
+  its name **and every alias** in `allowedNames`. An unset list covers
+  anything.
+- A `Deny` rule matching the namespace and kind denies the CR when its
+  domain is in `allowedDomains` (unset: any) and its name or **any** alias
+  is in `allowedNames` (unset: any). That's how names are reserved for
+  every namespace.
+- Rules of every policy are pooled; a `Deny` always wins.
+
+It is checked by the admission webhook on create and update — a refused CR
+never gets in, with `NamespaceNotAllowed` in the error — and again by the
+reconciler before any Stalwart call, for CRs created while the webhook was
+bypassed.
+
+CRs bound to a `StalwartLocalInstance` are not governed by the allow-list:
+the namespace's own API key bounds them.
+
+## An example
+
+```yaml
+apiVersion: stalwart.weebo.io/v1alpha1
+kind: StalwartNamespacePolicy
+metadata:
+  name: mail-allow
+spec:
+  rules:
+    # Each application namespace sends as its own names only.
+    - namespaces: [forgejo]
+      allowedKinds: [StalwartServiceAccount]
+      allowedDomains: [example.internal]
+      allowedNames: [forgejo, noreply]
+    - namespaces: [authentik]
+      allowedKinds: [StalwartServiceAccount]
+      allowedDomains: [example.internal]
+      allowedNames: [authentik]
+    # People's mailboxes, groups and lists live in `mail`.
+    - namespaces: [mail]
+      allowedKinds: [StalwartAccount, StalwartGroup, StalwartMailingList]
+      allowedDomains: [example.internal]
+    # Infrastructure names, reserved for every namespace, `mail` included.
+    - effect: Deny
+      namespaces: ["*"]
+      allowedKinds: [StalwartServiceAccount, StalwartAccount, StalwartGroup, StalwartMailingList]
+      allowedNames: [postmaster, abuse, admin, root]
+```
+
+With it, `forgejo` can't create `admin@example.internal`, nor the address of
+a future user, and `mail` can create any mailbox but `postmaster@`.
+
+```console
+$ kubectl -n batlehub apply -f service-account.yaml
+Error from server (Forbidden): admission webhook "validate.stalwart.weebo.io" denied the request:
+NamespaceNotAllowed: …
+```
+
+## What it doesn't do
+
+- It doesn't stop two CRs of allowed namespaces from asking for the same
+  address: the first one to create it owns it, the other fails with
+  `RemoteObjectClaimed`.
+- It governs the namespaced kinds only. `StalwartInstance`,
+  `StalwartDomain` and `StalwartNamespacePolicy` are cluster-scoped:
+  Kubernetes RBAC alone decides who writes them.
+- A rule with no namespace or no kind can never match: its policy is
+  `Ready: False` (`InvalidSpec`).
+
+## Next
+
+[Monitoring & troubleshooting](/docs/guides/operations).

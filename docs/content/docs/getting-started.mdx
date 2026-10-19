@@ -1,0 +1,187 @@
+---
+title: Getting started
+description: From an empty cluster to a first mail domain and an application's SMTP account managed by the operator.
+---
+
+This walkthrough installs the operator, connects it to your Stalwart,
+declares one mail domain and gives an application a sending account whose
+credentials land in a Secret. It takes about ten minutes.
+
+**Before you begin**, you need:
+
+- a Kubernetes 1.30+ cluster and `kubectl` + `helm` pointed at it;
+- [cert-manager](https://cert-manager.io/docs/installation/) installed in
+  that cluster;
+- a Stalwart **v0.16** (v0.16.25 to v0.16.27) reachable from the cluster,
+  and an administrator account on it to create the operator's API key.
+
+<Steps>
+<Step>
+
+### Install the operator
+
+```bash
+helm install weebo-stalwart oci://ghcr.io/batleforc/charts/weebo-stalwart \
+  --namespace weebo-stalwart --create-namespace
+```
+
+Check that both replicas are running:
+
+```bash
+kubectl -n weebo-stalwart get pods
+```
+
+```text
+NAME                              READY   STATUS    RESTARTS   AGE
+weebo-stalwart-7d9c6b5f48-4mzpl   1/1     Running   0          40s
+weebo-stalwart-7d9c6b5f48-vx2qn   1/1     Running   0          40s
+```
+
+</Step>
+<Step>
+
+### Give it its API keys
+
+The operator talks to Stalwart with an **API key**, sent as
+`Authorization: Bearer`, and creates the sending accounts' App Passwords
+with a second, narrow one. As an administrator, create both on the
+operator's account (see
+[The API key](/docs/guides/connect-instance#the-api-key) and
+[The App Password key](/docs/guides/connect-instance#the-app-password-key)
+for the permissions each needs), then store them in a Secret:
+
+```bash
+kubectl -n mail create secret generic stalwart-operator-token \
+  --from-literal=token=<the-api-key> \
+  --from-literal=appPasswordToken=<the-app-password-key>
+```
+
+</Step>
+<Step>
+
+### Connect your Stalwart
+
+Save this as `instance.yaml`, with the address of Stalwart's HTTP listener:
+
+```yaml title="instance.yaml"
+apiVersion: stalwart.weebo.io/v1alpha1
+kind: StalwartInstance
+metadata:
+  name: main
+spec:
+  url: http://stalwart.mail.svc:8080   # the HTTP listener, not /jmap
+  tokenSecretRef:
+    name: stalwart-operator-token
+    namespace: mail
+    key: token
+  appPasswordTokenSecretRef:
+    name: stalwart-operator-token
+    namespace: mail
+    key: appPasswordToken
+```
+
+```bash
+kubectl apply -f instance.yaml
+kubectl get stalwartinstance
+```
+
+```text
+NAME   URL                             READY   REASON       AGE
+main   http://stalwart.mail.svc:8080   True    Reconciled   12s
+```
+
+`READY` must read `True`. If it reads `False`, the `REASON` column tells you
+why (see [reason codes](/docs/reference/reason-codes)).
+
+</Step>
+<Step>
+
+### Declare a domain and a sending account
+
+Save this as `first.yaml`:
+
+```yaml title="first.yaml"
+apiVersion: stalwart.weebo.io/v1alpha1
+kind: StalwartDomain
+metadata:
+  name: example.internal     # the domain name
+---
+apiVersion: stalwart.weebo.io/v1alpha1
+kind: StalwartServiceAccount
+metadata:
+  name: hello
+  namespace: default
+spec:
+  domainRef: { name: example.internal }
+  aliases: [noreply]         # noreply@example.internal, the From
+```
+
+```bash
+kubectl apply -f first.yaml
+kubectl get stalwartdomain,stalwartserviceaccount -A
+```
+
+```text
+NAME                                                 DOMAIN             INSTANCE   READY   REASON       AGE
+stalwartdomain.stalwart.weebo.io/example.internal    example.internal   main       True    Reconciled   8s
+
+NAMESPACE   NAME                                               INSTANCE   ADDRESS                    READY   REASON       AGE
+default     stalwartserviceaccount.stalwart.weebo.io/hello     main       hello@example.internal     True    Reconciled   6s
+```
+
+Stalwart refuses a domain whose top-level label it doesn't know: use a real
+domain, or a special-use one (`.internal`, `.lan`, `.test`, `.home.arpa`).
+
+</Step>
+<Step>
+
+### Read the credentials
+
+The account has no password: Stalwart generated an App Password for it,
+which the operator wrote, with the submission settings, to a Secret named
+after the CR:
+
+```bash
+kubectl -n default get secret hello -o go-template='{{range $k, $v := .data}}{{$k}}={{$v | base64decode}}{{"\n"}}{{end}}'
+```
+
+```text
+from=noreply@example.internal
+host=stalwart.mail.svc.cluster.local
+password=app_…
+port=587
+security=starttls
+username=hello@example.internal
+```
+
+Point the application's SMTP settings at those keys. To rotate the App
+Password, give the annotation `stalwart.weebo.io/rotate-secret` a new value.
+
+</Step>
+<Step>
+
+### See it hold
+
+Remove the `noreply` alias in Stalwart's web admin, wait a moment, and
+reload: it's back, and the CR has a `DriftCorrected` Event. The YAML is the
+source of truth.
+
+To remove what you created:
+
+```bash
+kubectl delete -f first.yaml
+```
+
+A service account defaults to `deletionPolicy: Delete`: the account and its
+Secret go with the CR. **The domain stays in Stalwart**: a `StalwartDomain`
+is never deleted by the operator.
+
+</Step>
+</Steps>
+
+## Next steps
+
+- Learn the vocabulary in [Concepts](/docs/concepts).
+- Give people a mailbox: [Mailboxes](/docs/guides/accounts).
+- Hand credentials to an app through Vault: [Service accounts](/docs/guides/service-accounts).
+- Before giving other teams access, set up [the allow-list](/docs/guides/allow-list).

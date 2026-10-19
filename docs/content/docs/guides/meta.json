@@ -1,0 +1,15 @@
+{
+  "title": "Guides",
+  "pages": [
+    "install",
+    "connect-instance",
+    "domains",
+    "service-accounts",
+    "accounts",
+    "groups-and-lists",
+    "allow-list",
+    "operations",
+    "security",
+    "migration"
+  ]
+}

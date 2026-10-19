@@ -1,0 +1,200 @@
+---
+title: Monitoring & troubleshooting
+description: Read a CR's status, handle disruptive changes and deletion, and wire up metrics and ArgoCD.
+---
+
+Every CR says whether it's in sync and, if not, why. This page explains how
+to read that, what to do about each reason, and how to watch the operator
+from your monitoring stack and from ArgoCD.
+
+## Check the status
+
+For a quick overview, list the kinds with their `READY` and `REASON`
+columns:
+
+```bash
+kubectl get stalwartinstances,stalwartdomains,stalwartnamespacepolicies   # cluster-scoped
+kubectl get stalwartserviceaccounts,stalwartaccounts,stalwartgroups,stalwartmailinglists -A
+```
+
+When something reads `False`, look at the condition:
+
+```bash
+kubectl -n forgejo describe stalwartserviceaccount forgejo
+```
+
+Every kind shares one status shape:
+
+```yaml
+status:
+  observedGeneration: 3
+  remoteId: "b"                       # the Stalwart object this CR owns
+  address: forgejo@example.internal   # the address Stalwart confirmed
+  instance: { kind: Instance, name: main }
+  conditions:
+    - type: Ready
+      status: "False"
+      reason: DomainNotReady
+      message: StalwartDomain "example.internal" is not ready yet
+```
+
+The operator also records a Kubernetes **Event** for every error and every
+state change of a CR (`Created`, `DriftCorrected` naming the fields put
+back, `Deleted`, `Released`); `kubectl describe` and
+`kubectl get events -n forgejo` show the history
+([Events](/docs/reference/events) lists them all).
+
+## Reason codes
+
+Each code, where it shows up, what it means and what to do about it is in
+[Reason codes](/docs/reference/reason-codes), generated from the operator's
+source so it always matches the installed version. The usual ones:
+
+| Reason | Usually |
+| --- | --- |
+| `NamespaceNotAllowed` | The [allow-list](/docs/guides/allow-list) doesn't cover the kind, the domain, the name or one of the aliases |
+| `DomainNotFound` / `DomainNotReady` | The `domainRef` is wrong, or the domain isn't `Ready` on the same instance yet |
+| `StalwartObjectAlreadyExists` | The address exists in Stalwart without a CR (made by hand, or by a first OpenID Connect sign-in): use the [importer](/docs/guides/migration) |
+| `RemoteObjectClaimed` | Another CR owns that address |
+| `SecretTargetFailed` | A target Secret is owned by something else, or Vault refused the write |
+| `UnsupportedStalwartVersion` | Stalwart was upgraded to a schema this release doesn't know |
+
+## Disruptive changes
+
+Some changes move addresses, and with them whoever sends to them:
+
+- renaming a domain (`StalwartDomain.spec.name`);
+- renaming an account, a group or a list (`spec.name`), or moving it to
+  another domain (`domainRef`).
+
+These are refused (`InvalidSpec`) until you opt in on the CR:
+
+```bash
+kubectl -n mail annotate stalwartaccount alice stalwart.weebo.io/allow-disruptive-update=true
+```
+
+## Deletion
+
+`spec.deletionPolicy` decides what happens in Stalwart when you delete a CR:
+
+| Policy | Effect | Default for |
+| --- | --- | --- |
+| `Orphan` | The Stalwart object stays | Domains (the only value), mailboxes, groups |
+| `Delete` | The Stalwart object is deleted | Service accounts (and the secrets they wrote), mailing lists |
+
+Whatever the policy, the operator only deletes the object recorded in the
+CR's `status.remoteId`, after checking it still has the address the CR
+confirmed. A failed cleanup is retried and reported as a Warning Event
+(action `Cleanup`): `ObjectIsLinked` when Stalwart refuses because other
+objects still use it (a group with members). The annotation
+`stalwart.weebo.io/force-orphan: "true"` releases the CR without cleanup.
+
+## Metrics and alerts
+
+### Prometheus
+
+Each replica serves Prometheus metrics in plain HTTP on port `9090`
+(`GET /metrics`), exposed by the `weebo-stalwart-metrics` Service. It's on
+by default (`metrics.prometheus.enabled`). With the prometheus-operator:
+
+```yaml
+serviceMonitor:
+  enabled: true
+  labels:
+    release: kube-prometheus-stack   # whatever your Prometheus selects on
+prometheusRule:
+  enabled: true
+```
+
+Every metric, its labels and example queries are in
+[Metrics & health](/docs/reference/metrics). Beyond the kit's, the operator
+exports `weebo_stalwart_api_requests_total{method, outcome}` (every Stalwart
+call) and `weebo_stalwart_accounts{state}` (mailboxes by `Active`, `Locked`,
+`NotReady`): alert on `weebo_stalwart_accounts{state="NotReady"} > 0` for
+10 minutes to catch a lock that didn't apply.
+
+### Built-in alerts
+
+`prometheusRule.enabled` ships these (`prometheusRule.defaultRules: false`
+to drop them, `additionalRules` to add yours):
+
+| Alert | Fires when | Severity |
+| --- | --- | --- |
+| `WeeboStalwartOperatorDown` | No replica answers the scrape for 5 min: the webhook is most likely down too | critical |
+| `WeeboStalwartNoLeader` | No replica reports `weebo_stalwart_leader = 1` for 5 min: nothing reconciles, and no account gets locked | critical |
+| `WeeboStalwartMultipleLeaders` | More than one leader for 5 min: two releases sharing a Lease name | warning |
+| `WeeboStalwartReconcileErrors` | More than 10 % of a kind's reconciles fail over 15 min | warning |
+| `WeeboStalwartReconcileSlow` | p99 reconcile of a kind above 60 s for 30 min | info |
+| `WeeboStalwartRepeatedDrift` | A kind's objects are rewritten on every reconcile: a comparison bug, not a drift | warning |
+
+### OTLP traces and metrics
+
+Set `OTEL_EXPORTER_OTLP_ENDPOINT` through the chart's `extraEnv` to also
+export traces and metrics over OTLP/gRPC:
+
+```yaml
+extraEnv:
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: http://otel-collector.observability:4317
+  - name: RUST_LOG          # log verbosity, default info
+    value: info
+```
+
+The API keys never appear in logs or traces: the `Authorization` header is
+marked sensitive. Nor do the App Passwords the operator publishes: Stalwart
+returns each one once, and no error quotes that answer.
+
+## When the operator is down
+
+Mail keeps working: Stalwart serves with what it has. What stops is
+creation, changes and locking — an account set to `Locked` while no leader
+runs keeps its App Passwords working until the operator is back. With
+`webhook.failurePolicy: Fail`, no CR of these kinds can be created or
+updated while no replica answers; nothing else in the cluster is affected.
+
+## ArgoCD
+
+ArgoCD doesn't know how to tell whether these CRs are healthy. Without a
+health check, they show as *Progressing* forever. The chart ships one in the
+`weebo-stalwart-argocd-health` ConfigMap. Add it to ArgoCD's `argocd-cm`
+once per kind, for example:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cm
+  namespace: argocd
+data:
+  resource.customizations.health.stalwart.weebo.io_StalwartAccount: |
+    hs = {}
+    if obj.status ~= nil and obj.status.conditions ~= nil then
+      for i, condition in ipairs(obj.status.conditions) do
+        if condition.type == "Ready" then
+          if condition.status == "True" then
+            hs.status = "Healthy"
+          elseif condition.status == "False" then
+            hs.status = "Degraded"
+          else
+            hs.status = "Progressing"
+          end
+          hs.message = condition.message
+          return hs
+        end
+      end
+    end
+    hs.status = "Progressing"
+    hs.message = "Waiting for Ready condition"
+    return hs
+  # …repeat for StalwartInstance, StalwartLocalInstance, StalwartDomain,
+  # StalwartNamespacePolicy, StalwartServiceAccount, StalwartGroup,
+  # StalwartMailingList.
+```
+
+Every kind uses the same script, the `health.lua` key of that ConfigMap.
+When CRs are applied in the same sync as the CRDs, add
+`argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true` to them.
+
+## Next
+
+[Security model](/docs/guides/security).

@@ -1,0 +1,143 @@
+---
+title: Install
+description: Install, upgrade and uninstall the operator and its CRDs with Helm.
+---
+
+The operator ships as a Helm chart that installs the CRDs, the operator
+Deployment and its admission webhook. Stalwart itself is not part of it.
+
+## Before you begin
+
+- **Kubernetes 1.30+** (the chart refuses older clusters), with `kubectl`
+  and `helm` 3.8+ (for OCI charts).
+- **[cert-manager](https://cert-manager.io/docs/installation/)**, which
+  issues the admission webhook's TLS certificate. You can do without it and
+  provide the certificate yourself (`webhook.certManager.enabled=false`,
+  `webhook.tls.secretName`, `webhook.caBundle`).
+- **Stalwart v0.16**. The operator checks the management schema the server
+  serves (`GET /api/schema`): a release it was not tested against reports
+  `UnsupportedStalwartVersion` and nothing is written. This release speaks
+  the schema of Stalwart v0.16.25 to v0.16.27.
+
+## Install
+
+```bash
+helm install weebo-stalwart oci://ghcr.io/batleforc/charts/weebo-stalwart \
+  --namespace weebo-stalwart --create-namespace --version X.Y.Z
+```
+
+Versions are listed on the
+[releases page](https://github.com/batleforc/weebo-stalwart/releases). Every
+image and chart is signed with cosign.
+
+### Check the install
+
+```bash
+kubectl -n weebo-stalwart get pods
+kubectl get crd | grep stalwart.weebo.io
+```
+
+Two `Running` pods and eight CRDs mean you're ready to
+[connect a Stalwart](/docs/guides/connect-instance).
+
+## What gets deployed
+
+| Object | Why |
+| --- | --- |
+| CRDs (8) | The API. Templated, so upgrades update them; never deleted by Helm (see [CRDs](#crds)) |
+| Deployment (2 replicas) | One replica is elected leader (a Lease) and does the work; every replica answers the webhook |
+| PodDisruptionBudget | Keeps a webhook replica up during node drains |
+| ValidatingWebhookConfiguration | Checks the spec's rules and the [allow-list](/docs/guides/allow-list) when domains and the namespaced kinds are created or updated (never on delete) |
+| Certificate (+ Issuer) | Webhook TLS, rotated by cert-manager and reloaded every 60 s |
+| ClusterRole (+ Binding), Role (+ Binding) | The operator's own permissions; the Role covers its leader-election Lease. See [Security model](/docs/guides/security) |
+| Services `weebo-stalwart`, `weebo-stalwart-metrics` | The webhook (HTTPS), and Prometheus metrics (HTTP, when enabled) |
+| ConfigMap `weebo-stalwart-argocd-health` | A health check for ArgoCD; see [ArgoCD](/docs/guides/operations#argocd) |
+| Optional: ServiceMonitor, PrometheusRule, NetworkPolicy | See [Metrics](/docs/guides/operations#metrics-and-alerts) and [Network policy](/docs/guides/security#network-policy) |
+
+## Main values
+
+Every value is validated against the chart's `values.schema.json`: a typo
+or an invalid enum fails the install instead of being ignored. `helm show
+values oci://ghcr.io/batleforc/charts/weebo-stalwart` prints them all with
+their comments.
+
+| Value | Default | Description |
+| --- | --- | --- |
+| `replicaCount` | `2` | Operator replicas. Keep at least 2: with `failurePolicy: Fail`, no webhook replica means no CR can be written |
+| `image.tag` | `v` + chart `appVersion` | Add `-static` for the statically linked image, e.g. `vX.Y.Z-static` |
+| `image.digest` | | `sha256:…`: pull `repository@digest`, ignoring `tag` |
+| `crds.install` | `true` | Install and upgrade the CRDs with the chart |
+| `watch.namespace` | | Only the namespaced kinds of this namespace |
+| `watch.labelSelector` | `{}` | Only the objects this selector matches: splits the work between releases |
+| `watch.clusterKinds` | `true` | `false`: fully namespaced, no cluster-scoped kind (objects use the `StalwartLocalInstance`s of `watch.namespace`) |
+| `references.crossNamespace` | `false` | Let a CR use a `StalwartLocalInstance` of another namespace that shares itself with it |
+| `reconcileConcurrency` | `4` | Reconciles run at once per kind |
+| `webhook.failurePolicy` | `Fail` | Keep `Fail`: the allow-list is a security boundary, and `Ignore` would skip it while the webhook is down |
+| `metrics.prometheus.enabled` | `true` | Prometheus endpoint |
+| `serviceMonitor.enabled` / `prometheusRule.enabled` | `false` | prometheus-operator objects |
+| `networkPolicy.enabled` | `false` | See [Network policy](/docs/guides/security#network-policy); `networkPolicy.egress.stalwart` lists the Stalwart servers |
+| `extraEnv` | `[]` | Extra environment variables, e.g. `OTEL_EXPORTER_OTLP_ENDPOINT` or `RUST_LOG` |
+
+## Release artifacts
+
+| Artifact | Where |
+| --- | --- |
+| Helm chart | `oci://ghcr.io/batleforc/charts/weebo-stalwart`, version `X.Y.Z` (also attached to the GitHub Release) |
+| Operator image (Red Hat Hummingbird) | `ghcr.io/batleforc/weebo-stalwart-operator:vX.Y.Z` (and `latest`), `linux/amd64` |
+| Operator image (static) | `ghcr.io/batleforc/weebo-stalwart-operator:vX.Y.Z-static` (and `static`), when its scan passed |
+| CRD bundle | `weebo-stalwart-crds.yaml` on the [GitHub Release](https://github.com/batleforc/weebo-stalwart/releases) |
+
+Both images also contain `weebo-stalwart-importer`, used to
+[link existing objects](/docs/guides/migration). They carry an SBOM and
+SLSA provenance, and are signed with cosign.
+
+## CRDs
+
+The chart renders the CRDs as regular templates (`templates/crds/`), not
+from Helm's `crds/` directory, which Helm installs once and never upgrades.
+So `helm upgrade` upgrades the CRDs too. Each CRD carries
+`helm.sh/resource-policy: keep`: `helm uninstall`, or switching
+`crds.install` off, never deletes them, and with them every CR.
+
+If you manage CRDs separately, install with `crds.install=false` and apply
+the release's bundle yourself, **before** each chart upgrade:
+
+```bash
+kubectl apply --server-side \
+  -f https://github.com/batleforc/weebo-stalwart/releases/download/vX.Y.Z/weebo-stalwart-crds.yaml
+```
+
+## Upgrade
+
+```bash
+helm upgrade weebo-stalwart oci://ghcr.io/batleforc/charts/weebo-stalwart \
+  --namespace weebo-stalwart --version X.Y.Z
+```
+
+Read the release notes first: they list any CRD or value change, and the
+Stalwart versions the release supports. A Stalwart upgrade that changes the
+management schema needs an operator release that knows it: upgrade the
+operator first.
+
+## Uninstall
+
+```bash
+helm uninstall weebo-stalwart --namespace weebo-stalwart
+```
+
+This removes the operator but **keeps the CRDs and your CRs**, so nothing in
+Stalwart is touched, and mail keeps flowing. Deleting the CRDs deletes every
+CR: only do that after the operator has cleaned up whatever it should (see
+[Deletion](/docs/guides/operations#deletion)).
+
+A CR whose cleanup can't succeed any more (its instance or token already
+gone) stays in `Terminating` with a Warning Event of action `Cleanup`.
+Release it without touching Stalwart or its Secrets:
+
+```bash
+kubectl annotate stalwartserviceaccount app stalwart.weebo.io/force-orphan=true
+```
+
+## Next
+
+[Connect a Stalwart](/docs/guides/connect-instance).

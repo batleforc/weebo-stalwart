@@ -1,0 +1,50 @@
+---
+title: StalwartDomain
+description: A mail domain of a Stalwart instance (x:Domain).
+full: true
+---
+
+- **API version:** `stalwart.weebo.io/v1alpha1`
+- **Scope:** Cluster
+- **Short names:** none
+- **Guide:** [Domains](/docs/guides/domains)
+
+A mail domain of a Stalwart instance (`x:Domain`). Cluster-scoped: a
+domain is shared by every namespace's accounts, which reference it by
+name (`domainRef`). Created when missing, then compared on every
+reconcile and written only when a field the operator owns drifted. Never
+deleted by the operator: deleting the CR leaves the domain in Stalwart
+(`deletionPolicy: Orphan`); a domain is removed by hand.
+
+Stalwart also refuses a name whose top-level label it doesn't know: the
+special-use ones (`.internal`, `.lan`, `.home.arpa`, `.test`) are
+accepted, an arbitrary one is not.
+
+## Example
+
+```yaml
+apiVersion: stalwart.weebo.io/v1alpha1
+kind: StalwartDomain
+metadata:
+  name: my-domain
+spec:
+  name: example.internal
+```
+
+## Spec fields
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `aliases` | `string[]` | no |  | Other domain names delivering to the same mailboxes, compared as a set. |
+| `catchAll` | `string` | no |  | Local-part receiving mail sent to an unknown address of the domain (`<catchAll>@<name>`). Unset: no opinion, the catch-all is left as it is. |
+| `deletionPolicy` | `string` | no | `"Orphan"` | Only `Orphan`: the operator's API key may not destroy domains, and a domain is removed by hand. |
+| `dkim` | `string` | no | `"Automatic"` | `Automatic`: Stalwart generates the domain's DKIM keys (Ed25519 and RSA, its default parameters) and signs with them; their DNS records are published by hand. `Manual`: keys are managed outside the operator. |
+| `instanceRef` | `object` | no |  | The `StalwartInstance` (or shared `StalwartLocalInstance`) the domain lives on. Unset: the only `StalwartInstance`. |
+| `name` | `string` | no |  | The domain name (lowercased by Stalwart). Defaults to the CR's `metadata.name`. Changing it moves every address of the domain: it is only applied with the annotation `stalwart.weebo.io/allow-disruptive-update: "true"`. |
+| `subAddressing` | `string` | no | `"Enabled"` | Plus-addressing (`name+tag@domain` delivered to `name@domain`). |
+
+## Build a manifest
+
+Answer the questions and fill in the fields: the YAML preview updates as you type, ready to copy or download and `kubectl apply`.
+
+<CrdForm kind="StalwartDomain" />

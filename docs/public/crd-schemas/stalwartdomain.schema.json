@@ -1,0 +1,94 @@
+{
+  "apiVersion": "stalwart.weebo.io/v1alpha1",
+  "kind": "StalwartDomain",
+  "scope": "Cluster",
+  "description": "A mail domain of a Stalwart instance (`x:Domain`). Cluster-scoped: a\ndomain is shared by every namespace's accounts, which reference it by\nname (`domainRef`). Created when missing, then compared on every\nreconcile and written only when a field the operator owns drifted. Never\ndeleted by the operator: deleting the CR leaves the domain in Stalwart\n(`deletionPolicy: Orphan`); a domain is removed by hand.\n\nStalwart also refuses a name whose top-level label it doesn't know: the\nspecial-use ones (`.internal`, `.lan`, `.home.arpa`, `.test`) are\naccepted, an arbitrary one is not.",
+  "properties": {
+    "aliases": {
+      "description": "Other domain names delivering to the same mailboxes, compared as a\nset.",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 64,
+      "type": "array"
+    },
+    "catchAll": {
+      "description": "Local-part receiving mail sent to an unknown address of the domain\n(`<catchAll>@<name>`). Unset: no opinion, the catch-all is left as\nit is.",
+      "nullable": true,
+      "type": "string"
+    },
+    "deletionPolicy": {
+      "default": "Orphan",
+      "description": "Only `Orphan`: the operator's API key may not destroy domains, and a\ndomain is removed by hand.",
+      "enum": [
+        "Delete",
+        "Orphan"
+      ],
+      "type": "string",
+      "x-kubernetes-validations": [
+        {
+          "message": "a StalwartDomain is never deleted by the operator: deletionPolicy must be Orphan",
+          "rule": "self == 'Orphan'"
+        }
+      ]
+    },
+    "dkim": {
+      "default": "Automatic",
+      "description": "`Automatic`: Stalwart generates the domain's DKIM keys (Ed25519 and\nRSA, its default parameters) and signs with them; their DNS records\nare published by hand. `Manual`: keys are managed outside the\noperator.",
+      "enum": [
+        "Automatic",
+        "Manual"
+      ],
+      "type": "string"
+    },
+    "instanceRef": {
+      "description": "The `StalwartInstance` (or shared `StalwartLocalInstance`) the\ndomain lives on. Unset: the only `StalwartInstance`.",
+      "nullable": true,
+      "properties": {
+        "kind": {
+          "description": "The kind of instance a reference designates.",
+          "enum": [
+            "Instance",
+            "LocalInstance"
+          ],
+          "nullable": true,
+          "type": "string"
+        },
+        "name": {
+          "description": "`metadata.name` of the instance.",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Namespace of a `LocalInstance`. Defaults to this object's own;\nrequired on a cluster-scoped object. Another namespace's local\ninstance must share itself with this one (its `sharedWith`).",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object",
+      "x-kubernetes-validations": [
+        {
+          "message": "namespace only applies to kind LocalInstance",
+          "rule": "!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'"
+        }
+      ]
+    },
+    "name": {
+      "description": "The domain name (lowercased by Stalwart). Defaults to the CR's\n`metadata.name`. Changing it moves every address of the domain: it\nis only applied with the annotation\n`stalwart.weebo.io/allow-disruptive-update: \"true\"`.",
+      "nullable": true,
+      "type": "string"
+    },
+    "subAddressing": {
+      "default": "Enabled",
+      "description": "Plus-addressing (`name+tag@domain` delivered to `name@domain`).",
+      "enum": [
+        "Enabled",
+        "Disabled"
+      ],
+      "type": "string"
+    }
+  },
+  "type": "object"
+}

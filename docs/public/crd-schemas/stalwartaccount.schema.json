@@ -1,0 +1,103 @@
+{
+  "apiVersion": "stalwart.weebo.io/v1alpha1",
+  "kind": "StalwartAccount",
+  "scope": "Namespaced",
+  "description": "A person's mailbox (`x:Account` of type `User`), without any\ncredential: its owner logs in through the instance's OpenID Connect\nprovider, which finds the account by local-part and domain, and creates\nApp Passwords in the web interface. The name, aliases, quota, locale and\ntime zone are the operator's; the description and the group memberships\nare left to the OpenID Connect login.\n\n`state: Locked` keeps the mailbox, its address and its App Passwords,\nbut refuses every login (App Passwords included), sending and delivery;\n`Active` gives them back. A locked account that reached that state is\n`Ready: True`.\n\nThe account is read by `status.remoteId`, never adopted by name: an\naddress already taken in Stalwart (an account the OpenID Connect login\ncreated first) fails (`StalwartObjectAlreadyExists`) until\n`weebo-stalwart-importer` links it to this CR.",
+  "properties": {
+    "aliases": {
+      "description": "Other local-parts delivering to this mailbox, in the same domain.\nCompared as a set.",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 32,
+      "type": "array"
+    },
+    "deletionPolicy": {
+      "default": "Orphan",
+      "description": "`Orphan` (default): deleting the CR leaves the mailbox in Stalwart.\n`Delete`: deleting the CR deletes the mailbox and its mail.",
+      "enum": [
+        "Delete",
+        "Orphan"
+      ],
+      "type": "string"
+    },
+    "domainRef": {
+      "description": "The `StalwartDomain` (cluster-scoped, by `metadata.name`) the\naccount's address and aliases are in. It must be `Ready` on the\nsame instance.",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "instanceRef": {
+      "description": "The `StalwartInstance` (or `StalwartLocalInstance`) the account\nlives on. Unset: the only `StalwartInstance`, else the only\n`StalwartLocalInstance` of the namespace.",
+      "nullable": true,
+      "properties": {
+        "kind": {
+          "description": "The kind of instance a reference designates.",
+          "enum": [
+            "Instance",
+            "LocalInstance"
+          ],
+          "nullable": true,
+          "type": "string"
+        },
+        "name": {
+          "description": "`metadata.name` of the instance.",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Namespace of a `LocalInstance`. Defaults to this object's own;\nrequired on a cluster-scoped object. Another namespace's local\ninstance must share itself with this one (its `sharedWith`).",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object",
+      "x-kubernetes-validations": [
+        {
+          "message": "namespace only applies to kind LocalInstance",
+          "rule": "!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'"
+        }
+      ]
+    },
+    "locale": {
+      "description": "Locale of the account (`fr-FR`). Unset: no opinion.",
+      "nullable": true,
+      "type": "string"
+    },
+    "name": {
+      "description": "The local-part of the account's address (`<name>@<domain>`),\nlowercased: the user's login name at the OpenID Connect provider.\nDefaults to the CR's `metadata.name`. Changing it moves the address:\nonly applied with the annotation\n`stalwart.weebo.io/allow-disruptive-update: \"true\"`.",
+      "nullable": true,
+      "type": "string"
+    },
+    "quota": {
+      "description": "Disk quota of the mailbox (`2Gi`). Unset: no opinion, the server's\nvalue is kept.",
+      "nullable": true
+    },
+    "state": {
+      "default": "Active",
+      "description": "`Active`, or `Locked`: logins (App Passwords included), sending and\ndelivery refused, the mailbox, its address and its App Passwords\nkept.",
+      "enum": [
+        "Active",
+        "Locked"
+      ],
+      "type": "string"
+    },
+    "timeZone": {
+      "description": "Time zone of the account (`Europe/Paris`). Unset: no opinion.",
+      "nullable": true,
+      "type": "string"
+    }
+  },
+  "required": [
+    "domainRef"
+  ],
+  "type": "object"
+}

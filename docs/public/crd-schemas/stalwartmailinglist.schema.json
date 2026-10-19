@@ -1,0 +1,116 @@
+{
+  "apiVersion": "stalwart.weebo.io/v1alpha1",
+  "kind": "StalwartMailingList",
+  "scope": "Namespaced",
+  "description": "A mailing list (`x:MailingList`): an address relaying every message to\nits recipients — addresses, or the `StalwartAccount`s of this\nnamespace. Compared on every reconcile, recipients as a set, and\nwritten only when it drifted.",
+  "properties": {
+    "aliases": {
+      "description": "Other local-parts of the list, in the same domain. Compared as a\nset.",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 32,
+      "type": "array"
+    },
+    "deletionPolicy": {
+      "default": "Delete",
+      "description": "`Delete` (default): deleting the CR deletes the list. `Orphan`: the\nlist is left in Stalwart.",
+      "enum": [
+        "Delete",
+        "Orphan"
+      ],
+      "type": "string"
+    },
+    "domainRef": {
+      "description": "The `StalwartDomain` (cluster-scoped, by `metadata.name`) the list's\naddress and aliases are in. It must be `Ready` on the same instance.",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "instanceRef": {
+      "description": "The `StalwartInstance` (or `StalwartLocalInstance`) the list lives\non. Unset: the only `StalwartInstance`, else the only\n`StalwartLocalInstance` of the namespace.",
+      "nullable": true,
+      "properties": {
+        "kind": {
+          "description": "The kind of instance a reference designates.",
+          "enum": [
+            "Instance",
+            "LocalInstance"
+          ],
+          "nullable": true,
+          "type": "string"
+        },
+        "name": {
+          "description": "`metadata.name` of the instance.",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Namespace of a `LocalInstance`. Defaults to this object's own;\nrequired on a cluster-scoped object. Another namespace's local\ninstance must share itself with this one (its `sharedWith`).",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object",
+      "x-kubernetes-validations": [
+        {
+          "message": "namespace only applies to kind LocalInstance",
+          "rule": "!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'"
+        }
+      ]
+    },
+    "name": {
+      "description": "The local-part of the list's address, lowercased. Defaults to the\nCR's `metadata.name`. Changing it moves the address: only applied\nwith the annotation `stalwart.weebo.io/allow-disruptive-update:\n\"true\"`.",
+      "nullable": true,
+      "type": "string"
+    },
+    "recipients": {
+      "default": [],
+      "description": "Who receives the list's messages. Compared as a set of addresses,\nwhatever their case.",
+      "items": {
+        "description": "One recipient: an `address`, or an `accountRef`.",
+        "properties": {
+          "accountRef": {
+            "description": "A `StalwartAccount` of this namespace: its confirmed address\n(`status.address`).",
+            "nullable": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "address": {
+            "description": "A mail address, inside or outside the instance.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object",
+        "x-kubernetes-validations": [
+          {
+            "message": "a recipient is either an address or an accountRef",
+            "rule": "has(self.address) != has(self.accountRef)"
+          }
+        ]
+      },
+      "maxItems": 1000,
+      "type": "array"
+    }
+  },
+  "required": [
+    "domainRef"
+  ],
+  "type": "object"
+}

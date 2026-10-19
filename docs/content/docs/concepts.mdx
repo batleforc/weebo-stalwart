@@ -1,0 +1,93 @@
+---
+title: Concepts
+description: The few ideas behind the operator, and the words the rest of the docs use.
+---
+
+## How it works
+
+```text
+  you / GitOps ──apply──▶  Kubernetes API  ──watch──▶  weebo-stalwart  ──JMAP──▶  Stalwart
+                            (custom resources)          (operator)       (API key)
+                                    ▲                        │
+                                    └──── status, events ────┘
+                                                             └──▶ Secrets / Vault
+```
+
+You describe what Stalwart should contain as Kubernetes resources. The
+operator watches them, compares each one with Stalwart (through its JMAP
+management API, `POST <url>/jmap`), sends only the fields that differ, and
+writes the outcome back on the resource's `status`. The App Passwords it
+has Stalwart generate for sending accounts are written to Secrets or Vault.
+
+## Vocabulary
+
+| Term | Meaning |
+| --- | --- |
+| **CR** (custom resource) | One YAML object of a kind this operator adds, such as a `StalwartAccount`. Each CR stands for one object in Stalwart. |
+| **CRD** | The definition of a kind (its fields and their types). The chart installs them; see the [CRD reference](/docs/crds). |
+| **Reconcile** | One pass where the operator compares a CR with Stalwart and fixes the difference. It runs when the CR changes, when something it refers to changes, and periodically. |
+| **Drift** | A difference that appeared in Stalwart after the fact, such as an alias removed by hand in the web admin. The next reconcile puts it back and records a `DriftCorrected` Event naming the fields. |
+| **Local-part** | What comes before the `@` of an address. A CR's `name` and `aliases` are local-parts; the domain comes from its `domainRef`. |
+| **Ref** (`domainRef`, `accountRef`, `instanceRef`) | A pointer to another CR by its Kubernetes name: a `StalwartDomain` (cluster-scoped), a `StalwartAccount` of the same namespace, an instance. |
+| **Remote id** | `status.remoteId`: the id Stalwart gave the object this CR created. The object is read by that id from then on, never looked up by name. |
+| **Claim** | An address (or domain name) belongs to the first CR that created it on a server. Another CR asking for it fails (`RemoteObjectClaimed`) instead of taking it over. |
+| **Deletion policy** | What happens in Stalwart when the CR is deleted: `Orphan` keeps the object, `Delete` removes it. |
+| **Finalizer** | A marker Kubernetes keeps on a CR until the operator has finished cleaning up, so a deletion is never half done. |
+| **Secret targets** | Where a sending account's credentials are written: one or more Kubernetes Secrets and/or the Vault path `<pathPrefix>/<namespace>/smtp`. See [Service accounts](/docs/guides/service-accounts#secret-targets). |
+| **Admission webhook** | A check the API server runs before accepting a CR. It enforces [the allow-list](/docs/guides/allow-list) and the spec's own rules at `kubectl apply` time. |
+| **Disruptive update** | A change that moves addresses (renaming a domain or an account). It's refused unless you opt in with an annotation; see [Disruptive changes](/docs/guides/operations#disruptive-changes). |
+
+## The kinds
+
+The instance, the domain and the allow-list are **cluster-scoped**, governed
+by Kubernetes RBAC alone: they belong to whoever runs the mail server. Every
+other kind is **namespaced**: it belongs to a team or an application, and —
+when bound to a shared `StalwartInstance` — is also governed by the
+[allow-list](/docs/guides/allow-list).
+
+| Kind | Scope | Stalwart object | Stands for |
+| --- | --- | --- | --- |
+| [`StalwartInstance`](/docs/crds/stalwartinstance) | Cluster | — | The connection to a Stalwart server |
+| [`StalwartLocalInstance`](/docs/crds/stalwartlocalinstance) | Namespaced | — | A namespace's own connection to a Stalwart server |
+| [`StalwartNamespacePolicy`](/docs/crds/stalwartnamespacepolicy) | Cluster | — | Allow-list rules for the namespaced kinds |
+| [`StalwartDomain`](/docs/crds/stalwartdomain) | Cluster | `x:Domain` | A mail domain, never deleted by the operator |
+| [`StalwartServiceAccount`](/docs/crds/stalwartserviceaccount) | Namespaced | `x:Account` `User` + an App Password | An application's sending account, its App Password delivered to a Secret |
+| [`StalwartAccount`](/docs/crds/stalwartaccount) | Namespaced | `x:Account` `User` | A person's mailbox, signed in to through OpenID Connect |
+| [`StalwartGroup`](/docs/crds/stalwartgroup) | Namespaced | `x:Account` `Group` | A shared address delivering to its members |
+| [`StalwartMailingList`](/docs/crds/stalwartmailinglist) | Namespaced | `x:MailingList` | An address relaying to a list of recipients |
+
+Addresses are unique across the whole server: an account, a group, a list
+and every alias share one space of addresses. A CR whose address (or one of
+its aliases) is already taken fails instead of being created.
+
+## Status
+
+Every CR reports the same way: a `Ready` condition with a **reason** (a
+stable code such as `Reconciled` or `NamespaceNotAllowed`) and a readable
+message, plus the Stalwart id and address of the object it owns.
+`kubectl get` shows `READY` and `REASON` for every kind, and `ADDRESS` for
+the account kinds. All reasons are listed in
+[Reason codes](/docs/reference/reason-codes).
+
+```yaml
+status:
+  observedGeneration: 2
+  remoteId: "b"                      # the Stalwart object this CR owns
+  address: forgejo@example.internal  # the address Stalwart confirmed
+  lastRotation: "2026-10-19"         # the last rotate-secret nonce served
+  instance: { kind: Instance, name: main }
+  conditions:
+    - type: Ready
+      status: "True"
+      reason: Reconciled
+```
+
+## Which Stalwart?
+
+Every namespaced CR and every domain has an optional `instanceRef`
+(`{name: main}`). Leave it out when the cluster has a single
+`StalwartInstance`, which is used by default. With several instances, set it
+on every CR. A namespace can also bring its own server as a
+`StalwartLocalInstance`. Once a CR is bound to an instance
+(`status.instance`), it never moves to another one. An account must live on
+the same instance as its domain.

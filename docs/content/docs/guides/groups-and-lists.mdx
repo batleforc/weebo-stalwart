@@ -1,0 +1,79 @@
+---
+title: Groups and mailing lists
+description: Shared addresses delivering to their members, and lists relaying every message to their recipients.
+---
+
+Two kinds give a team one address: a **group** is a shared account whose
+members come from the OpenID Connect provider; a **mailing list** relays
+every message to the recipients you list.
+
+## Groups
+
+A `StalwartGroup` is an `x:Account` of type `Group`: a shared address (and
+mailbox) delivering to its members.
+
+```yaml
+apiVersion: stalwart.weebo.io/v1alpha1
+kind: StalwartGroup
+metadata:
+  name: devs
+  namespace: mail
+spec:
+  domainRef: { name: example.internal }
+  name: devs                    # = the group's name in the provider's groups claim
+  aliases: [developers]
+  quota: 10Gi                   # the shared mailbox
+```
+
+Members are **not** managed here: at each sign-in, Stalwart's OpenID
+Connect login sets a user's groups from the provider's `groups` claim, where
+`name` must appear.
+
+The same login also creates a group for every name of the claim the first
+time a member signs in. A `StalwartGroup` declared after that fails with
+`StalwartObjectAlreadyExists` until the [importer](/docs/guides/migration)
+links it to the existing group: declare the group **before** publishing it
+in the claim.
+
+`deletionPolicy: Orphan` (the default) leaves the group in Stalwart.
+`Delete` deletes it — refused by Stalwart while accounts are still members
+(`ObjectIsLinked`), and retried until they are gone.
+
+## Mailing lists
+
+A `StalwartMailingList` is an `x:MailingList`: an address relaying every
+message to its recipients.
+
+```yaml
+apiVersion: stalwart.weebo.io/v1alpha1
+kind: StalwartMailingList
+metadata:
+  name: team
+  namespace: mail
+spec:
+  domainRef: { name: example.internal }
+  name: team                    # team@example.internal
+  recipients:
+    - accountRef: { name: alice }   # a StalwartAccount of this namespace
+    - address: bob@example.com      # any address, inside or outside the server
+```
+
+Each recipient is either an `address` or an `accountRef`, never both (the
+CRD refuses it). An `accountRef` resolves to the account's confirmed
+`status.address`: until that account exists and is `Ready`, the list is
+`Ready: False` (`AccountNotFound`). Recipients are compared as a set of
+addresses, whatever their case: reordering them sends nothing.
+
+A list holds no mail, so `deletionPolicy: Delete` is its default: deleting
+the CR deletes the list. `Orphan` leaves it in Stalwart.
+
+## One address space
+
+Accounts, groups, lists and every alias share the server's addresses: a CR
+asking for an address another object holds fails —
+`RemoteObjectClaimed` when another CR owns it, `StalwartObjectAlreadyExists`
+when no CR does.
+
+## Next
+
+[The allow-list](/docs/guides/allow-list).
