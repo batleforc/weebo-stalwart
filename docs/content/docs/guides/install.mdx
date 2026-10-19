@@ -72,6 +72,7 @@ their comments.
 | `watch.clusterKinds` | `true` | `false`: fully namespaced, no cluster-scoped kind (objects use the `StalwartLocalInstance`s of `watch.namespace`) |
 | `references.crossNamespace` | `false` | Let a CR use a `StalwartLocalInstance` of another namespace that shares itself with it |
 | `reconcileConcurrency` | `4` | Reconciles run at once per kind |
+| `workerThreads` | `4` | tokio worker threads: not one per core, each keeps its own allocator arena and reconciles wait on the network |
 | `webhook.failurePolicy` | `Fail` | Keep `Fail`: the allow-list is a security boundary, and `Ignore` would skip it while the webhook is down |
 | `metrics.prometheus.enabled` | `true` | Prometheus endpoint |
 | `serviceMonitor.enabled` / `prometheusRule.enabled` | `false` | prometheus-operator objects |
