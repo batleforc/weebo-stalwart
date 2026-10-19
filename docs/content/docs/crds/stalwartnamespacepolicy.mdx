@@ -48,7 +48,17 @@ spec:
 
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `rules` | `object[]` | yes |  |  |
+| [`rules`](#spec.rules) | `object[]` | yes |  |  |
+
+### `spec.rules[]` [#spec.rules]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `allowedDomains` | `string[]` | no |  | `StalwartDomain`s (by `metadata.name`) the objects may live in. Unset: any. On a `Deny` rule: only deny requests in one of these. |
+| `allowedKinds` | `string[]` | yes |  | Values: `"StalwartServiceAccount"`, `"StalwartAccount"`, `"StalwartGroup"`, `"StalwartMailingList"` |
+| `allowedNames` | `string[]` | no |  | Local-parts the objects may claim: an object's name **and** each of its aliases must be listed. Unset: any. On a `Deny` rule: deny requests whose name or any alias is listed — the way to reserve names (`postmaster`, `admin`…) for every namespace. |
+| `effect` | `string` | no | `"Allow"` | Values: `"Allow"`, `"Deny"` |
+| `namespaces` | `string[]` | yes |  | Namespace names, `*` for all, or a prefix glob like `team-*`. |
 
 ## Build a manifest
 

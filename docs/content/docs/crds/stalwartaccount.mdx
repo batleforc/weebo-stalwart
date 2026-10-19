@@ -49,15 +49,33 @@ spec:
 
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `aliases` | `string[]` | no |  | Other local-parts delivering to this mailbox, in the same domain. Compared as a set. |
-| `deletionPolicy` | `string` | no | `"Orphan"` | `Orphan` (default): deleting the CR leaves the mailbox in Stalwart. `Delete`: deleting the CR deletes the mailbox and its mail. |
-| `domainRef` | `object` | yes |  | The `StalwartDomain` (cluster-scoped, by `metadata.name`) the account's address and aliases are in. It must be `Ready` on the same instance. |
-| `instanceRef` | `object` | no |  | The `StalwartInstance` (or `StalwartLocalInstance`) the account lives on. Unset: the only `StalwartInstance`, else the only `StalwartLocalInstance` of the namespace. |
+| `aliases` | `string[]` | no |  | Other local-parts delivering to this mailbox, in the same domain. Compared as a set.<br /><br />Constraints: `maxItems: 32` |
+| `deletionPolicy` | `string` | no | `"Orphan"` | `Orphan` (default): deleting the CR leaves the mailbox in Stalwart. `Delete`: deleting the CR deletes the mailbox and its mail.<br /><br />Values: `"Delete"`, `"Orphan"` |
+| [`domainRef`](#spec.domainRef) | `object` | yes |  | The `StalwartDomain` (cluster-scoped, by `metadata.name`) the account's address and aliases are in. It must be `Ready` on the same instance. |
+| [`instanceRef`](#spec.instanceRef) | `object` | no |  | The `StalwartInstance` (or `StalwartLocalInstance`) the account lives on. Unset: the only `StalwartInstance`, else the only `StalwartLocalInstance` of the namespace. |
 | `locale` | `string` | no |  | Locale of the account (`fr-FR`). Unset: no opinion. |
 | `name` | `string` | no |  | The local-part of the account's address (`<name>@<domain>`), lowercased: the user's login name at the OpenID Connect provider. Defaults to the CR's `metadata.name`. Changing it moves the address: only applied with the annotation `stalwart.weebo.io/allow-disruptive-update: "true"`. |
-| `quota` | `object` | no |  | Disk quota of the mailbox (`2Gi`). Unset: no opinion, the server's value is kept. |
-| `state` | `string` | no | `"Active"` | `Active`, or `Locked`: logins (App Passwords included), sending and delivery refused, the mailbox, its address and its App Passwords kept. |
+| `quota` | `int-or-string` | no |  | Disk quota of the mailbox (`2Gi`). Unset: no opinion, the server's value is kept. |
+| `state` | `string` | no | `"Active"` | `Active`, or `Locked`: logins (App Passwords included), sending and delivery refused, the mailbox, its address and its App Passwords kept.<br /><br />Values: `"Active"`, `"Locked"` |
 | `timeZone` | `string` | no |  | Time zone of the account (`Europe/Paris`). Unset: no opinion. |
+
+### `spec.domainRef` [#spec.domainRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `name` | `string` | yes |  |  |
+
+### `spec.instanceRef` [#spec.instanceRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | `string` | no |  | The kind of instance a reference designates.<br /><br />Values: `"Instance"`, `"LocalInstance"` |
+| `name` | `string` | yes |  | `metadata.name` of the instance. |
+| `namespace` | `string` | no |  | Namespace of a `LocalInstance`. Defaults to this object's own; required on a cluster-scoped object. Another namespace's local instance must share itself with this one (its `sharedWith`). |
+
+**Rules**
+
+- namespace only applies to kind LocalInstance — `!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'`
 
 ## Build a manifest
 

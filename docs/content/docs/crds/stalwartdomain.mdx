@@ -35,13 +35,29 @@ spec:
 
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `aliases` | `string[]` | no |  | Other domain names delivering to the same mailboxes, compared as a set. |
+| `aliases` | `string[]` | no |  | Other domain names delivering to the same mailboxes, compared as a set.<br /><br />Constraints: `maxItems: 64` |
 | `catchAll` | `string` | no |  | Local-part receiving mail sent to an unknown address of the domain (`<catchAll>@<name>`). Unset: no opinion, the catch-all is left as it is. |
-| `deletionPolicy` | `string` | no | `"Orphan"` | Only `Orphan`: the operator's API key may not destroy domains, and a domain is removed by hand. |
-| `dkim` | `string` | no | `"Automatic"` | `Automatic`: Stalwart generates the domain's DKIM keys (Ed25519 and RSA, its default parameters) and signs with them; their DNS records are published by hand. `Manual`: keys are managed outside the operator. |
-| `instanceRef` | `object` | no |  | The `StalwartInstance` (or shared `StalwartLocalInstance`) the domain lives on. Unset: the only `StalwartInstance`. |
+| `deletionPolicy` | `string` | no | `"Orphan"` | Only `Orphan`: the operator's API key may not destroy domains, and a domain is removed by hand.<br /><br />Values: `"Delete"`, `"Orphan"` |
+| `dkim` | `string` | no | `"Automatic"` | `Automatic`: Stalwart generates the domain's DKIM keys (Ed25519 and RSA, its default parameters) and signs with them; their DNS records are published by hand. `Manual`: keys are managed outside the operator.<br /><br />Values: `"Automatic"`, `"Manual"` |
+| [`instanceRef`](#spec.instanceRef) | `object` | no |  | The `StalwartInstance` (or shared `StalwartLocalInstance`) the domain lives on. Unset: the only `StalwartInstance`. |
 | `name` | `string` | no |  | The domain name (lowercased by Stalwart). Defaults to the CR's `metadata.name`. Changing it moves every address of the domain: it is only applied with the annotation `stalwart.weebo.io/allow-disruptive-update: "true"`. |
-| `subAddressing` | `string` | no | `"Enabled"` | Plus-addressing (`name+tag@domain` delivered to `name@domain`). |
+| `subAddressing` | `string` | no | `"Enabled"` | Plus-addressing (`name+tag@domain` delivered to `name@domain`).<br /><br />Values: `"Enabled"`, `"Disabled"` |
+
+**Rules**
+
+- `deletionPolicy`: a StalwartDomain is never deleted by the operator: deletionPolicy must be Orphan — `self == 'Orphan'`
+
+### `spec.instanceRef` [#spec.instanceRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | `string` | no |  | The kind of instance a reference designates.<br /><br />Values: `"Instance"`, `"LocalInstance"` |
+| `name` | `string` | yes |  | `metadata.name` of the instance. |
+| `namespace` | `string` | no |  | Namespace of a `LocalInstance`. Defaults to this object's own; required on a cluster-scoped object. Another namespace's local instance must share itself with this one (its `sharedWith`). |
+
+**Rules**
+
+- namespace only applies to kind LocalInstance — `!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'`
 
 ## Build a manifest
 

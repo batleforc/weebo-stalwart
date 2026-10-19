@@ -38,12 +38,47 @@ spec:
 
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `aliases` | `string[]` | no |  | Other local-parts of the list, in the same domain. Compared as a set. |
-| `deletionPolicy` | `string` | no | `"Delete"` | `Delete` (default): deleting the CR deletes the list. `Orphan`: the list is left in Stalwart. |
-| `domainRef` | `object` | yes |  | The `StalwartDomain` (cluster-scoped, by `metadata.name`) the list's address and aliases are in. It must be `Ready` on the same instance. |
-| `instanceRef` | `object` | no |  | The `StalwartInstance` (or `StalwartLocalInstance`) the list lives on. Unset: the only `StalwartInstance`, else the only `StalwartLocalInstance` of the namespace. |
+| `aliases` | `string[]` | no |  | Other local-parts of the list, in the same domain. Compared as a set.<br /><br />Constraints: `maxItems: 32` |
+| `deletionPolicy` | `string` | no | `"Delete"` | `Delete` (default): deleting the CR deletes the list. `Orphan`: the list is left in Stalwart.<br /><br />Values: `"Delete"`, `"Orphan"` |
+| [`domainRef`](#spec.domainRef) | `object` | yes |  | The `StalwartDomain` (cluster-scoped, by `metadata.name`) the list's address and aliases are in. It must be `Ready` on the same instance. |
+| [`instanceRef`](#spec.instanceRef) | `object` | no |  | The `StalwartInstance` (or `StalwartLocalInstance`) the list lives on. Unset: the only `StalwartInstance`, else the only `StalwartLocalInstance` of the namespace. |
 | `name` | `string` | no |  | The local-part of the list's address, lowercased. Defaults to the CR's `metadata.name`. Changing it moves the address: only applied with the annotation `stalwart.weebo.io/allow-disruptive-update: "true"`. |
-| `recipients` | `object[]` | no | `[]` | Who receives the list's messages. Compared as a set of addresses, whatever their case. |
+| [`recipients`](#spec.recipients) | `object[]` | no | `[]` | Who receives the list's messages. Compared as a set of addresses, whatever their case.<br /><br />Constraints: `maxItems: 1000` |
+
+### `spec.domainRef` [#spec.domainRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `name` | `string` | yes |  |  |
+
+### `spec.instanceRef` [#spec.instanceRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | `string` | no |  | The kind of instance a reference designates.<br /><br />Values: `"Instance"`, `"LocalInstance"` |
+| `name` | `string` | yes |  | `metadata.name` of the instance. |
+| `namespace` | `string` | no |  | Namespace of a `LocalInstance`. Defaults to this object's own; required on a cluster-scoped object. Another namespace's local instance must share itself with this one (its `sharedWith`). |
+
+**Rules**
+
+- namespace only applies to kind LocalInstance — `!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'`
+
+### `spec.recipients[]` [#spec.recipients]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`accountRef`](#spec.recipients.accountRef) | `object` | no |  | A `StalwartAccount` of this namespace: its confirmed address (`status.address`). |
+| `address` | `string` | no |  | A mail address, inside or outside the instance. |
+
+**Rules**
+
+- a recipient is either an address or an accountRef — `has(self.address) != has(self.accountRef)`
+
+### `spec.recipients[].accountRef` [#spec.recipients.accountRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `name` | `string` | yes |  |  |
 
 ## Build a manifest
 
