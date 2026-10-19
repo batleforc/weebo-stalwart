@@ -176,6 +176,7 @@ spec: {{domainRef: {{name: "{name}"}}, quota: 1Gi}}
         shutdown: Shutdown::never(),
         health: Arc::new(Health::default()),
         scope: WatchScope::cluster(),
+        watches: Default::default(),
     });
     tokio::spawn(controller::stalwart_domain::run(
         client.clone(),

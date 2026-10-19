@@ -234,6 +234,7 @@ fn ctx(operator: &Client, scope: WatchScope) -> (Arc<Ctx>, Arc<Health>) {
         shutdown: Shutdown::never(),
         health: health.clone(),
         scope,
+        watches: Default::default(),
     });
     (ctx, health)
 }

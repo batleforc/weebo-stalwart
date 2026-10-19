@@ -5,7 +5,8 @@
 //! selector, or a namespaced one outside the namespace it is limited to,
 //! doesn't exist for it.
 //!
-//! The policies and the claiming kinds are read from the binary's live
+//! The policies, the claiming kinds, the domains and the instances (whose
+//! servers a claim compares) are read from the binary's live
 //! reflector stores when it wires them in ([`KubeClusterReader::with_stores`]),
 //! from the API otherwise: a claim check reads every CR of four kinds, on
 //! every creation — from the API, a burst of N creations is N² objects
@@ -22,17 +23,14 @@ use application::ports::{
     PolicySource, VaultSettings,
 };
 use std::sync::Arc;
-use std::time::Duration;
 
 use kube::api::ListParams;
 use kube::core::{Selector, SelectorExt};
 use kube::runtime::reflector::Store;
 use kube::{Api, Client, Resource, ResourceExt};
 use serde::de::DeserializeOwned;
-
-/// How long a read waits for a store's first list before reading the API
-/// instead (a watch that can't list must not hang every reconcile).
-const STORE_READY_TIMEOUT: Duration = Duration::from_secs(10);
+use weebo_kit_adapters::instance::STORE_READY_TIMEOUT;
+use weebo_kit_adapters::wait_synced;
 
 /// The binary's live stores, each on the operator's watch scope (its
 /// namespace and label selector, as the API reads).
@@ -43,6 +41,9 @@ pub struct ClaimStores {
     pub accounts: Option<Store<Account>>,
     pub groups: Option<Store<Group>>,
     pub mailing_lists: Option<Store<MailingList>>,
+    pub instances: Option<Store<Instance>>,
+    pub local_instances: Option<Store<LocalInstance>>,
+    pub domains: Option<Store<Domain>>,
 }
 
 pub struct KubeClusterReader {
@@ -76,6 +77,9 @@ stored!(
     Account => accounts,
     Group => groups,
     MailingList => mailing_lists,
+    Instance => instances,
+    LocalInstance => local_instances,
+    Domain => domains,
 );
 
 impl KubeClusterReader {
@@ -99,20 +103,17 @@ impl KubeClusterReader {
     /// Every `K` of `api` on the scope: from its store once listed, else
     /// listed from the API.
     async fn read<K: Stored>(&self, api: Api<K>) -> Result<Vec<Arc<K>>, ClusterError> {
-        if let Some(store) = K::store(&self.stores) {
-            match tokio::time::timeout(STORE_READY_TIMEOUT, store.wait_until_ready()).await {
-                Ok(Ok(())) => {
-                    return Ok(store
-                        .state()
-                        .into_iter()
-                        .filter(|o| self.selects(o.as_ref()))
-                        .collect());
-                }
-                _ => tracing::warn!(
-                    kind = %K::kind(&()),
-                    "the watch has not listed yet: reading from the API"
-                ),
-            }
+        // `wait_synced`, not `Store::wait_until_ready`: kube's readiness
+        // wakes only the last waiter, every other concurrent read would sit
+        // out the whole timeout. It warns before the API fallback.
+        if let Some(store) = K::store(&self.stores)
+            && wait_synced(store, STORE_READY_TIMEOUT).await
+        {
+            return Ok(store
+                .state()
+                .into_iter()
+                .filter(|o| self.selects(o.as_ref()))
+                .collect());
         }
         let list = api
             .list(&self.params())
@@ -192,30 +193,21 @@ impl KubeClusterReader {
         }
     }
 
-    /// The server each visible instance points at: its URL, lowercased,
-    /// without a trailing `/`.
+    /// The server each visible instance points at (on the scope, as the
+    /// instance resolution sees them): its URL, lowercased, without a
+    /// trailing `/`.
     async fn servers(&self) -> Result<Vec<(BoundInstance, String)>, ClusterError> {
         let server = |url: &str| url.trim_end_matches('/').to_ascii_lowercase();
         let mut servers = Vec::new();
         if self.cluster_kinds {
-            let list = Api::<Instance>::all(self.client.clone())
-                .list(&ListParams::default())
-                .await
-                .map_err(|e| ClusterError(format!("listing StalwartInstance: {e}")))?;
-            servers.extend(list.items.iter().map(|i| {
+            let instances = self.read(Api::<Instance>::all(self.client.clone())).await?;
+            servers.extend(instances.iter().map(|i| {
                 let name = i.meta().name.clone().unwrap_or_default();
                 (BoundInstance::cluster(name), server(&i.spec.url))
             }));
         }
-        let api = match &self.watched_namespace {
-            Some(ns) => Api::<LocalInstance>::namespaced(self.client.clone(), ns),
-            None => Api::<LocalInstance>::all(self.client.clone()),
-        };
-        let list = api
-            .list(&ListParams::default())
-            .await
-            .map_err(|e| ClusterError(format!("listing StalwartLocalInstance: {e}")))?;
-        servers.extend(list.items.iter().map(|i| {
+        let locals = self.read(self.namespaced::<LocalInstance>()).await?;
+        servers.extend(locals.iter().map(|i| {
             let meta = i.meta();
             let bound = BoundInstance::local(
                 meta.namespace.clone().unwrap_or_default(),
@@ -320,12 +312,9 @@ impl ClusterReader for KubeClusterReader {
                 if !self.cluster_kinds {
                     return Ok(claimed);
                 }
-                let list = Api::<Domain>::all(self.client.clone())
-                    .list(&self.params())
-                    .await
-                    .map_err(|e| ClusterError(format!("listing StalwartDomain: {e}")))?;
+                let domains = self.read(Api::<Domain>::all(self.client.clone())).await?;
                 for name in names {
-                    for d in &list.items {
+                    for d in &domains {
                         let owns = d.status.as_ref().is_some_and(|s| {
                             on_target(s)
                                 && s.address

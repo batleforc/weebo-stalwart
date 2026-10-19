@@ -24,6 +24,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use weebo_kit_runtime::events;
 use weebo_kit_runtime::metrics::ReconcileMetrics;
+use weebo_kit_runtime::shared::SharedWatches;
 use weebo_kit_runtime::status::StatusUpdate;
 use weebo_kit_runtime::{Health, WatchScope};
 
@@ -78,6 +79,65 @@ pub struct Ctx {
     /// What the controllers watch (`WEEBO_WATCH_NAMESPACE`,
     /// `WEEBO_WATCH_LABEL_SELECTOR`): every watch goes through it.
     pub scope: WatchScope,
+    /// The binary's shared watches ([`spawn_watches`]): one per kind for
+    /// every controller and every store read (`SharedWatches::default()`:
+    /// each controller watches on its own).
+    pub watches: SharedWatches,
+}
+
+/// One watch per kind, on `scope`, for every controller, the instance
+/// stores and the claim and policy reads (the cluster-scoped kinds only
+/// when the scope watches them). Spawned before the lease is campaigned
+/// for: a standby keeps them warm.
+pub fn spawn_watches(client: &Client, scope: &WatchScope, health: &Arc<Health>) -> SharedWatches {
+    let mut w = SharedWatches::default();
+    let (c, s, h) = (client, scope, health);
+    if scope.cluster_kinds() {
+        w.spawn(
+            s.api::<api::Instance>(c.clone()),
+            s,
+            h,
+            "StalwartInstance watch",
+        );
+        w.spawn(
+            s.api::<api::Domain>(c.clone()),
+            s,
+            h,
+            "StalwartDomain watch",
+        );
+        w.spawn(
+            s.api::<api::NamespacePolicy>(c.clone()),
+            s,
+            h,
+            "StalwartNamespacePolicy watch",
+        );
+    }
+    w.spawn(
+        s.api::<api::LocalInstance>(c.clone()),
+        s,
+        h,
+        "StalwartLocalInstance watch",
+    );
+    w.spawn(
+        s.api::<api::ServiceAccount>(c.clone()),
+        s,
+        h,
+        "StalwartServiceAccount watch",
+    );
+    w.spawn(
+        s.api::<api::Account>(c.clone()),
+        s,
+        h,
+        "StalwartAccount watch",
+    );
+    w.spawn(s.api::<api::Group>(c.clone()), s, h, "StalwartGroup watch");
+    w.spawn(
+        s.api::<api::MailingList>(c.clone()),
+        s,
+        h,
+        "StalwartMailingList watch",
+    );
+    w
 }
 
 /// What stopped a reconcile before (or instead of) its status.

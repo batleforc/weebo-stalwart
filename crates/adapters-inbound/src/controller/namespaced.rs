@@ -73,7 +73,9 @@ pub trait NamespacedKind:
 
 pub async fn run<K: NamespacedKind>(client: Client, ctx: Arc<Ctx>) {
     let health = ctx.health.clone();
-    let results = super::controller(ctx.scope.api::<K>(client), &ctx.scope)
+    let results = ctx
+        .watches
+        .controller(ctx.scope.api::<K>(client), &ctx.scope)
         .graceful_shutdown_on(ctx.shutdown.wait())
         .run(reconcile::<K>, error_policy, ctx);
     super::drive(K::KIND, health, results).await;

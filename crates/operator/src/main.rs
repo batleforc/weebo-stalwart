@@ -17,7 +17,7 @@ use api::{
 use kube::Client;
 use kube::api::ApiResource;
 use kube::runtime::events::{Recorder, Reporter};
-use weebo_kit_runtime::store::spawn_reflector;
+use weebo_kit_runtime::shared::{LISTED_TIMEOUT, SharedWatch};
 use weebo_kit_runtime::{Health, WatchScope, leader, telemetry, webhook_server};
 
 /// Default `LEASE_NAME`. Keep it across releases: old and new pods of a
@@ -125,22 +125,14 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     let shutdown = Shutdown::on_termination()?;
     let health = Arc::new(Health::default());
 
-    // Every resolution reads the instances: one reflector per kind (no
-    // StalwartInstance without cluster-scoped kinds).
-    let cluster_store = scope.cluster_kinds().then(|| {
-        spawn_reflector(
-            scope.api::<Instance>(client.clone()),
-            &scope,
-            health.clone(),
-            "StalwartInstance reflector",
-        )
-    });
-    let local_store = spawn_reflector(
-        scope.api::<LocalInstance>(client.clone()),
-        &scope,
-        health.clone(),
-        "StalwartLocalInstance reflector",
-    );
+    // One watch per kind, shared by every controller and by the instance,
+    // claim and policy reads (every resolution reads the instances, every
+    // creation the claims: from memory, not a LIST per reconcile). Started
+    // before campaigning for the lease: a standby keeps them warm, and the
+    // controllers start from stores that already listed.
+    let watches = controller::spawn_watches(&client, &scope, &health);
+    let cluster_store = watches.get::<Instance>().map(SharedWatch::store);
+    let local_store = watches.get::<LocalInstance>().map(SharedWatch::store);
     let instances = Arc::new(
         OperatorInstances::new(client.clone())
             .with_scope(
@@ -148,45 +140,22 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
                 scope.selector().cloned(),
                 scope.cluster_kinds(),
             )
-            .with_stores(cluster_store, Some(local_store)),
+            .with_stores(cluster_store, local_store),
     );
 
-    // The claims (every CR of the four namespaced kinds, read on each
-    // creation) and the policies (read on every reconcile) come from
-    // memory: from the API, a burst of N creations listed N² objects.
+    // The claims (every CR of the four namespaced kinds, the instances'
+    // servers and the domains, read on each creation) and the policies
+    // (read on every reconcile) come from the same stores: from the API, a
+    // burst of N creations listed N² objects.
     let claim_stores = ClaimStores {
-        policies: scope.cluster_kinds().then(|| {
-            spawn_reflector(
-                scope.api::<NamespacePolicy>(client.clone()),
-                &scope,
-                health.clone(),
-                "StalwartNamespacePolicy reflector",
-            )
-        }),
-        service_accounts: Some(spawn_reflector(
-            scope.api::<ServiceAccount>(client.clone()),
-            &scope,
-            health.clone(),
-            "StalwartServiceAccount reflector",
-        )),
-        accounts: Some(spawn_reflector(
-            scope.api::<Account>(client.clone()),
-            &scope,
-            health.clone(),
-            "StalwartAccount reflector",
-        )),
-        groups: Some(spawn_reflector(
-            scope.api::<Group>(client.clone()),
-            &scope,
-            health.clone(),
-            "StalwartGroup reflector",
-        )),
-        mailing_lists: Some(spawn_reflector(
-            scope.api::<MailingList>(client.clone()),
-            &scope,
-            health.clone(),
-            "StalwartMailingList reflector",
-        )),
+        policies: watches.get::<NamespacePolicy>().map(SharedWatch::store),
+        service_accounts: watches.get::<ServiceAccount>().map(SharedWatch::store),
+        accounts: watches.get::<Account>().map(SharedWatch::store),
+        groups: watches.get::<Group>().map(SharedWatch::store),
+        mailing_lists: watches.get::<MailingList>().map(SharedWatch::store),
+        instances: watches.get::<Instance>().map(SharedWatch::store),
+        local_instances: watches.get::<LocalInstance>().map(SharedWatch::store),
+        domains: watches.get::<Domain>().map(SharedWatch::store),
     };
     let cluster = Arc::new(
         KubeClusterReader::new(client.clone())
@@ -219,6 +188,7 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
         shutdown: shutdown.clone(),
         health: health.clone(),
         scope: scope.clone(),
+        watches,
     });
 
     // The HTTPS server (probes, the admission webhook, the scope guard) runs on every replica, before and regardless of leadership: a
@@ -241,9 +211,17 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     .await?;
 
     // The controllers, in contrast, run on one replica at a time: two
-    // active reconcilers could both create the same remote object.
+    // active reconcilers could both create the same remote object. The
+    // replica campaigns once its shared watches listed (their LISTs done
+    // before the lease, not in the leader's first minute), or after
+    // LISTED_TIMEOUT: a watch that can't list is reported by /livez, not
+    // waited for.
+    let campaign = async {
+        ctx.watches.wait_listed(LISTED_TIMEOUT).await;
+        leader::acquire_leadership(&client, holder_id, DEFAULT_LEASE_NAME).await
+    };
     let leadership = tokio::select! {
-        leadership = leader::acquire_leadership(&client, holder_id, DEFAULT_LEASE_NAME) => leadership,
+        leadership = campaign => leadership,
         () = shutdown.wait() => {
             server.stopped().await;
             return Ok(());

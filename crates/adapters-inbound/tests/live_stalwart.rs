@@ -154,6 +154,7 @@ fn ctx_with(client: Client, writes: Arc<AtomicUsize>, secrets: Arc<FakeSecretSto
         shutdown: Shutdown::never(),
         health: Arc::new(Health::default()),
         scope: WatchScope::cluster(),
+        watches: Default::default(),
     })
 }
 

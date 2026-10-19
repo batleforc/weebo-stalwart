@@ -44,6 +44,7 @@ fn ctx(client: Client) -> Arc<Ctx> {
         shutdown: Shutdown::never(),
         health: Arc::new(Health::default()),
         scope: WatchScope::cluster(),
+        watches: Default::default(),
     })
 }
 

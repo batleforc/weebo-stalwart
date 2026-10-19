@@ -12,8 +12,11 @@ use std::time::Duration;
 
 use adapters_inbound::controller::{self, Ctx, Shutdown};
 use adapters_outbound::KubeClusterReader;
+use adapters_outbound::cluster_reader::ClaimStores;
 use api::instance::{InstanceSpec, SecretKeyRef};
-use api::{Account, Domain, Group, MailingList, ServiceAccount};
+use api::{
+    Account, Domain, Group, Instance, LocalInstance, MailingList, NamespacePolicy, ServiceAccount,
+};
 use application::ports::SecretStore;
 use domain::account::RemotePermissions;
 use k8s_openapi::api::core::v1::{Event, Namespace};
@@ -23,6 +26,7 @@ use kube::{Client, Resource};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use testkit::{FakeGateway, FakeSecretStore, StaticGatewayFactory, StaticSecretStoreFactory};
+use weebo_kit_runtime::shared::SharedWatch;
 use weebo_kit_runtime::{Health, WatchScope};
 
 const TIMEOUT: Duration = Duration::from_secs(20);
@@ -30,7 +34,22 @@ const POLL: Duration = Duration::from_millis(200);
 
 fn ctx(client: Client, gateway: Arc<FakeGateway>, secrets: Arc<FakeSecretStore>) -> Arc<Ctx> {
     let instances = Arc::new(StaticGatewayFactory::new(gateway));
-    let cluster = Arc::new(KubeClusterReader::new(client.clone()));
+    // The binary's shared watches, and the claims and policies read from
+    // their stores.
+    let scope = WatchScope::cluster();
+    let health = Arc::new(Health::default());
+    let watches = controller::spawn_watches(&client, &scope, &health);
+    let stores = ClaimStores {
+        policies: watches.get::<NamespacePolicy>().map(SharedWatch::store),
+        service_accounts: watches.get::<ServiceAccount>().map(SharedWatch::store),
+        accounts: watches.get::<Account>().map(SharedWatch::store),
+        groups: watches.get::<Group>().map(SharedWatch::store),
+        mailing_lists: watches.get::<MailingList>().map(SharedWatch::store),
+        instances: watches.get::<Instance>().map(SharedWatch::store),
+        local_instances: watches.get::<LocalInstance>().map(SharedWatch::store),
+        domains: watches.get::<Domain>().map(SharedWatch::store),
+    };
+    let cluster = Arc::new(KubeClusterReader::new(client.clone()).with_stores(stores));
     let secrets: Arc<dyn SecretStore> = secrets;
     Arc::new(Ctx {
         client: client.clone(),
@@ -47,8 +66,9 @@ fn ctx(client: Client, gateway: Arc<FakeGateway>, secrets: Arc<FakeSecretStore>)
             },
         ),
         shutdown: Shutdown::never(),
-        health: Arc::new(Health::default()),
-        scope: WatchScope::cluster(),
+        health,
+        scope,
+        watches,
     })
 }
 
