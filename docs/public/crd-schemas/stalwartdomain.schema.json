@@ -2,6 +2,9 @@
   "apiVersion": "stalwart.weebo.io/v1alpha1",
   "kind": "StalwartDomain",
   "scope": "Cluster",
+  "served": [
+    "v1alpha1"
+  ],
   "description": "A mail domain of a Stalwart instance (`x:Domain`). Cluster-scoped: a\ndomain is shared by every namespace's accounts, which reference it by\nname (`domainRef`). Created when missing, then compared on every\nreconcile and written only when a field the operator owns drifted. Never\ndeleted by the operator: deleting the CR leaves the domain in Stalwart\n(`deletionPolicy: Orphan`); a domain is removed by hand.\n\nStalwart also refuses a name whose top-level label it doesn't know: the\nspecial-use ones (`.internal`, `.lan`, `.home.arpa`, `.test`) are\naccepted, an arbitrary one is not.",
   "properties": {
     "aliases": {

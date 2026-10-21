@@ -2,6 +2,9 @@
   "apiVersion": "stalwart.weebo.io/v1alpha1",
   "kind": "StalwartGroup",
   "scope": "Namespaced",
+  "served": [
+    "v1alpha1"
+  ],
   "description": "A group (`x:Account` of type `Group`): a shared address delivering to\nits members. Its members are not managed here: the OpenID Connect login\nsets them from the provider's `groups` claim, where `name` must appear.\n\nThe OpenID Connect login also creates a group for every name of the\nclaim the first time a member logs in: a `StalwartGroup` declared after\nthat fails (`StalwartObjectAlreadyExists`) until\n`weebo-stalwart-importer` links it to the existing group — declare it\nbefore the group is published in the claim.",
   "properties": {
     "aliases": {

@@ -1,0 +1,241 @@
+{
+  "version": 1,
+  "kinds": {
+    "StalwartAccount": {
+      "references": [
+        {
+          "path": "spec.domainRef",
+          "to": [
+            {
+              "group": "stalwart.weebo.io",
+              "kind": "StalwartDomain"
+            }
+          ]
+        },
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "stalwart.weebo.io",
+              "kind": "StalwartInstance"
+            },
+            {
+              "group": "stalwart.weebo.io",
+              "kind": "StalwartLocalInstance"
+            }
+          ]
+        }
+      ],
+      "produces": []
+    },
+    "StalwartDomain": {
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "stalwart.weebo.io",
+              "kind": "StalwartInstance"
+            },
+            {
+              "group": "stalwart.weebo.io",
+              "kind": "StalwartLocalInstance"
+            }
+          ]
+        }
+      ],
+      "produces": []
+    },
+    "StalwartGroup": {
+      "references": [
+        {
+          "path": "spec.domainRef",
+          "to": [
+            {
+              "group": "stalwart.weebo.io",
+              "kind": "StalwartDomain"
+            }
+          ]
+        },
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "stalwart.weebo.io",
+              "kind": "StalwartInstance"
+            },
+            {
+              "group": "stalwart.weebo.io",
+              "kind": "StalwartLocalInstance"
+            }
+          ]
+        }
+      ],
+      "produces": []
+    },
+    "StalwartInstance": {
+      "references": [
+        {
+          "path": "spec.appPasswordTokenSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.secretStore.vault.caSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.tls.caSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.tokenSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        }
+      ],
+      "produces": []
+    },
+    "StalwartLocalInstance": {
+      "references": [
+        {
+          "path": "spec.appPasswordTokenSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.tls.caSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.tokenSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        }
+      ],
+      "produces": []
+    },
+    "StalwartMailingList": {
+      "references": [
+        {
+          "path": "spec.domainRef",
+          "to": [
+            {
+              "group": "stalwart.weebo.io",
+              "kind": "StalwartDomain"
+            }
+          ]
+        },
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "stalwart.weebo.io",
+              "kind": "StalwartInstance"
+            },
+            {
+              "group": "stalwart.weebo.io",
+              "kind": "StalwartLocalInstance"
+            }
+          ]
+        },
+        {
+          "path": "spec.recipients[].accountRef",
+          "to": [
+            {
+              "group": "stalwart.weebo.io",
+              "kind": "StalwartAccount"
+            }
+          ]
+        }
+      ],
+      "produces": []
+    },
+    "StalwartNamespacePolicy": {
+      "references": [],
+      "produces": []
+    },
+    "StalwartServiceAccount": {
+      "references": [
+        {
+          "path": "spec.domainRef",
+          "to": [
+            {
+              "group": "stalwart.weebo.io",
+              "kind": "StalwartDomain"
+            }
+          ]
+        },
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "stalwart.weebo.io",
+              "kind": "StalwartInstance"
+            },
+            {
+              "group": "stalwart.weebo.io",
+              "kind": "StalwartLocalInstance"
+            }
+          ]
+        }
+      ],
+      "produces": [
+        {
+          "kind": {
+            "group": "",
+            "kind": "Secret"
+          },
+          "each": "spec.secretTargets[]",
+          "name": [
+            "name"
+          ],
+          "namespace": "namespace",
+          "keyNames": [
+            "host",
+            "port",
+            "security",
+            "username",
+            "password",
+            "from"
+          ],
+          "unless": {
+            "path": "backend",
+            "equals": "vault"
+          }
+        }
+      ]
+    }
+  }
+}

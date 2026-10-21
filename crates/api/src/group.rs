@@ -43,6 +43,7 @@ pub struct StalwartGroupSpec {
     /// The `StalwartDomain` (cluster-scoped, by `metadata.name`) the
     /// group's address and aliases are in. It must be `Ready` on the same
     /// instance.
+    #[schemars(extend("x-weebo-link" = { "to": [{ "group": "stalwart.weebo.io", "kind": "StalwartDomain" }] }))]
     pub domain_ref: ObjectRef,
     /// The local-part of the group's address, lowercased: the group's name
     /// in the OpenID Connect provider's `groups` claim. Defaults to the

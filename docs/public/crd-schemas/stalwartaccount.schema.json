@@ -2,6 +2,9 @@
   "apiVersion": "stalwart.weebo.io/v1alpha1",
   "kind": "StalwartAccount",
   "scope": "Namespaced",
+  "served": [
+    "v1alpha1"
+  ],
   "description": "A person's mailbox (`x:Account` of type `User`), without any\ncredential: its owner logs in through the instance's OpenID Connect\nprovider, which finds the account by local-part and domain, and creates\nApp Passwords in the web interface. The name, aliases, quota, locale and\ntime zone are the operator's; the description and the group memberships\nare left to the OpenID Connect login.\n\n`state: Locked` keeps the mailbox, its address and its App Passwords,\nbut refuses every login (App Passwords included), sending and delivery;\n`Active` gives them back. A locked account that reached that state is\n`Ready: True`.\n\nThe account is read by `status.remoteId`, never adopted by name: an\naddress already taken in Stalwart (an account the OpenID Connect login\ncreated first) fails (`StalwartObjectAlreadyExists`) until\n`weebo-stalwart-importer` links it to this CR.",
   "properties": {
     "aliases": {

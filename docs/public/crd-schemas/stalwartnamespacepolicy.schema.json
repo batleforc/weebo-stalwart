@@ -2,6 +2,9 @@
   "apiVersion": "stalwart.weebo.io/v1alpha1",
   "kind": "StalwartNamespacePolicy",
   "scope": "Cluster",
+  "served": [
+    "v1alpha1"
+  ],
   "description": "Namespace allow-list for the namespaced account kinds, enforced by the\nadmission webhook (CREATE/UPDATE) and re-checked by every reconciler\nbefore any Stalwart call. It governs the CRs bound to a\n`StalwartInstance` (shared by every namespace); a CR bound to a\n`StalwartLocalInstance` is bounded by its namespace's own token instead.\n\nWhile no `StalwartNamespacePolicy` exists, everything is allowed. As\nsoon as one exists, a namespaced CR is only accepted if some `Allow`\nrule matches its namespace and kind and covers the domains and names\nit asks for — and no `Deny` rule matches. Rules of every policy are\npooled; a `Deny` always wins.",
   "properties": {
     "rules": {

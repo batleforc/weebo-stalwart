@@ -51,6 +51,7 @@ pub struct StalwartServiceAccountSpec {
     /// The `StalwartDomain` (cluster-scoped, by `metadata.name`) the
     /// account's address and aliases are in. It must be `Ready` on the
     /// same instance.
+    #[schemars(extend("x-weebo-link" = { "to": [{ "group": "stalwart.weebo.io", "kind": "StalwartDomain" }] }))]
     pub domain_ref: ObjectRef,
     /// The local-part of the account's address (`<name>@<domain>`),
     /// lowercased. Defaults to the CR's `metadata.name`. Changing it moves

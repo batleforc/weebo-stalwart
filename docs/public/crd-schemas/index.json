@@ -2,41 +2,73 @@
   {
     "kind": "StalwartInstance",
     "singular": "stalwartinstance",
-    "scope": "Cluster"
+    "scope": "Cluster",
+    "apiVersion": "stalwart.weebo.io/v1alpha1",
+    "served": [
+      "v1alpha1"
+    ]
   },
   {
     "kind": "StalwartLocalInstance",
     "singular": "stalwartlocalinstance",
-    "scope": "Namespaced"
+    "scope": "Namespaced",
+    "apiVersion": "stalwart.weebo.io/v1alpha1",
+    "served": [
+      "v1alpha1"
+    ]
   },
   {
     "kind": "StalwartNamespacePolicy",
     "singular": "stalwartnamespacepolicy",
-    "scope": "Cluster"
+    "scope": "Cluster",
+    "apiVersion": "stalwart.weebo.io/v1alpha1",
+    "served": [
+      "v1alpha1"
+    ]
   },
   {
     "kind": "StalwartDomain",
     "singular": "stalwartdomain",
-    "scope": "Cluster"
+    "scope": "Cluster",
+    "apiVersion": "stalwart.weebo.io/v1alpha1",
+    "served": [
+      "v1alpha1"
+    ]
   },
   {
     "kind": "StalwartServiceAccount",
     "singular": "stalwartserviceaccount",
-    "scope": "Namespaced"
+    "scope": "Namespaced",
+    "apiVersion": "stalwart.weebo.io/v1alpha1",
+    "served": [
+      "v1alpha1"
+    ]
   },
   {
     "kind": "StalwartAccount",
     "singular": "stalwartaccount",
-    "scope": "Namespaced"
+    "scope": "Namespaced",
+    "apiVersion": "stalwart.weebo.io/v1alpha1",
+    "served": [
+      "v1alpha1"
+    ]
   },
   {
     "kind": "StalwartGroup",
     "singular": "stalwartgroup",
-    "scope": "Namespaced"
+    "scope": "Namespaced",
+    "apiVersion": "stalwart.weebo.io/v1alpha1",
+    "served": [
+      "v1alpha1"
+    ]
   },
   {
     "kind": "StalwartMailingList",
     "singular": "stalwartmailinglist",
-    "scope": "Namespaced"
+    "scope": "Namespaced",
+    "apiVersion": "stalwart.weebo.io/v1alpha1",
+    "served": [
+      "v1alpha1"
+    ]
   }
 ]
