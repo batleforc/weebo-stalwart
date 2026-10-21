@@ -3,7 +3,7 @@
 //! explicitly. Every reconcile updates `weebo_stalwart_accounts{state}`.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use api::Account;
 use api::common::{DeletionPolicy, InstanceRef};
@@ -67,7 +67,8 @@ fn key(account: &Account) -> String {
 
 /// Records `state` for `account` (`None`: gone), then the gauge.
 fn record(account: &Account, state: Option<&'static str>) {
-    let mut accounts = ACCOUNTS.lock().unwrap();
+    // A map of plain values: a panic mid-insert leaves it consistent.
+    let mut accounts = ACCOUNTS.lock().unwrap_or_else(PoisonError::into_inner);
     match state {
         Some(state) => accounts.insert(key(account), state),
         None => accounts.remove(&key(account)),

@@ -4,7 +4,7 @@
 //! stores, read back, no drift (the live suite checks the same against
 //! the real image).
 
-use adapters_outbound::jmap::SUPPORTED_SCHEMAS;
+use adapters_outbound::jmap::{MAX_BODY_BYTES, SUPPORTED_SCHEMAS};
 use adapters_outbound::{JmapClient, JmapGateway};
 use application::ports::{GatewayError, RemoteGateway};
 use domain::mail_domain::{DesiredDomain, DkimManagement, SubAddressing, domain_patch};
@@ -196,6 +196,27 @@ async fn an_unreachable_server_is_unreachable() {
         gateway(&server).get_domain("b").await,
         Err(GatewayError::Unreachable(_))
     ));
+}
+
+#[tokio::test]
+async fn an_oversized_answer_is_refused_not_read_whole() {
+    let server = stalwart(supported()).await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![b' '; MAX_BODY_BYTES + 1]))
+        .mount(&server)
+        .await;
+    assert!(
+        matches!(gateway(&server).get_domain("b").await, Err(GatewayError::Api(m)) if m.contains("larger than"))
+    );
+    // An error's body is cut, its status still decides.
+    server.reset().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(401).set_body_bytes(vec![b'x'; MAX_BODY_BYTES + 1]))
+        .mount(&server)
+        .await;
+    assert!(
+        matches!(gateway(&server).ping().await, Err(GatewayError::Unauthorized(m)) if m.len() < 300)
+    );
 }
 
 #[tokio::test]
