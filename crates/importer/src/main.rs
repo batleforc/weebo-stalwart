@@ -52,7 +52,14 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // Two providers are linked (ring, aws-lc-rs): pick one. `Err`: already
+    // installed, which is as good.
+    if rustls::crypto::ring::default_provider()
+        .install_default()
+        .is_err()
+    {
+        eprintln!("note: a rustls crypto provider was already installed");
+    }
     let args = Args::parse();
 
     let mut yaml = String::new();

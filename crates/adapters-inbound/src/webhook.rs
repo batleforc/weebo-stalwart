@@ -26,7 +26,9 @@ use std::sync::Arc;
 use api::common::{InstanceRef, SecretTarget};
 use api::namespace_policy::NamespaceRule;
 use api::{Account, Group, MailingList, ServiceAccount, Status};
-use application::ports::{BoundInstance, ClusterReader, InstanceDirectory, PolicySource};
+use application::ports::{
+    BoundInstance, ClusterReader, InstanceDirectory, InstanceError, PolicySource, ResolveError,
+};
 use application::use_cases::admission::{
     check_account, check_domain, check_group, check_mailing_list, check_service_account,
     check_smtp_targets, enforce,
@@ -226,10 +228,21 @@ impl WebhookState {
     async fn resolve(&self, namespace: &str, cr: &Reviewed<'_>) -> Option<BoundInstance> {
         let directory = self.instances.as_ref()?;
         let recorded = cr.status.and_then(|s| s.instance.as_ref());
-        directory
+        match directory
             .resolve(Some(namespace), cr.instance_ref, recorded)
             .await
-            .ok()
+        {
+            Ok(instance) => Some(instance),
+            // No instance (yet): nothing to check against.
+            Err(InstanceError::Resolve(
+                ResolveError::NotFound { .. } | ResolveError::NoInstance,
+            )) => None,
+            // Fail open: the reconcile resolves again and reports it.
+            Err(e) => {
+                tracing::warn!(error = %e, "resolving the instance failed; targets left to the reconcile");
+                None
+            }
+        }
     }
 
     /// D15 against the instance's default backend, then the stores' Vault
