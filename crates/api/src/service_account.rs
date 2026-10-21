@@ -75,6 +75,8 @@ pub struct StalwartServiceAccountSpec {
     /// role may write.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(length(max = 8))]
+    // The keys each target holds, for the docs' CRD IDE (as `reconcile_service_account::credentials` writes them).
+    #[schemars(extend("x-weebo-keys" = ["host", "port", "security", "username", "password", "from"]))]
     pub secret_targets: Vec<SecretTarget>,
     /// `Delete` (default): deleting the CR deletes the account and the
     /// secrets it wrote. `Orphan`: both are left in place.
