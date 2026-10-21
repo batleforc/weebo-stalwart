@@ -30,18 +30,29 @@ pub fn address(local_part: &str, domain: &str) -> String {
     )
 }
 
+/// Why a name was refused.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum NameError {
+    #[error("{0:?} is not a domain name (1 to 253 characters)")]
+    DomainLength(String),
+    #[error("{0:?} is not a fully qualified domain name")]
+    NotQualified(String),
+    #[error("{name:?}: label {label:?} is not a hostname label")]
+    Label { name: String, label: String },
+    #[error("{0:?} is not a local-part (letters, digits, '.', '_', '-'; 64 characters at most)")]
+    LocalPart(String),
+}
+
 /// LDH labels (letters, digits, inner hyphens) of 1–63 bytes, at least two
 /// of them, 253 bytes at most: a hostname, as a mail domain must be.
-pub fn check_domain_name(name: &str) -> Result<(), String> {
+pub fn check_domain_name(name: &str) -> Result<(), NameError> {
     let name = normalize_domain(name);
     if name.is_empty() || name.len() > 253 {
-        return Err(format!(
-            "{name:?} is not a domain name (1 to 253 characters)"
-        ));
+        return Err(NameError::DomainLength(name));
     }
     let labels: Vec<&str> = name.split('.').collect();
     if labels.len() < 2 {
-        return Err(format!("{name:?} is not a fully qualified domain name"));
+        return Err(NameError::NotQualified(name));
     }
     for label in labels {
         let ldh = label
@@ -53,7 +64,10 @@ pub fn check_domain_name(name: &str) -> Result<(), String> {
             || label.starts_with('-')
             || label.ends_with('-')
         {
-            return Err(format!("{name:?}: label {label:?} is not a hostname label"));
+            return Err(NameError::Label {
+                label: label.to_string(),
+                name,
+            });
         }
     }
     Ok(())
@@ -62,7 +76,7 @@ pub fn check_domain_name(name: &str) -> Result<(), String> {
 /// The local-parts the operator creates: lowercase letters, digits, `.`,
 /// `_` and `-`, 64 bytes at most, no leading, trailing or doubled `.`. No
 /// `+`: it is Stalwart's sub-addressing separator.
-pub fn check_local_part(name: &str) -> Result<(), String> {
+pub fn check_local_part(name: &str) -> Result<(), NameError> {
     let name = normalize_local_part(name);
     let allowed = name
         .bytes()
@@ -74,9 +88,7 @@ pub fn check_local_part(name: &str) -> Result<(), String> {
         || name.ends_with('.')
         || name.contains("..")
     {
-        return Err(format!(
-            "{name:?} is not a local-part (letters, digits, '.', '_', '-'; 64 characters at most)"
-        ));
+        return Err(NameError::LocalPart(name));
     }
     Ok(())
 }

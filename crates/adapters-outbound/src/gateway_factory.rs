@@ -21,7 +21,7 @@ use weebo_kit_adapters::{
 };
 use weebo_kit_api::SecretKeyRef;
 
-use crate::jmap::{JmapClient, JmapGateway};
+use crate::jmap::{InvalidUrl, JmapClient, JmapGateway};
 
 /// The operator's instances, both kinds: also its `InstanceDirectory`.
 pub type OperatorInstances = Instances<Instance, LocalInstance>;
@@ -155,6 +155,10 @@ pub fn http_client(
         .map_err(|e| GatewayFactoryError::InvalidSpec(format!("building the HTTP client: {e}")))
 }
 
+fn invalid_url(e: InvalidUrl) -> GatewayFactoryError {
+    GatewayFactoryError::InvalidSpec(e.to_string())
+}
+
 #[async_trait::async_trait]
 impl GatewayFactory for JmapGatewayFactory {
     async fn gateway_for(
@@ -193,8 +197,7 @@ impl GatewayFactory for JmapGatewayFactory {
         let token = read_token(&self.client, "tokenSecretRef", &secret_ref, local).await?;
         let ca = self.ca(&tls).await?;
         let http = self.http(url, &tls, ca)?;
-        let client =
-            JmapClient::new(url, token, http.clone()).map_err(GatewayFactoryError::InvalidSpec)?;
+        let client = JmapClient::new(url, token, http.clone()).map_err(invalid_url)?;
         let mut gateway = JmapGateway::new(client);
         // RFC 0001 D24: the second key is read like the first, but only
         // when a call needs it — a `StalwartServiceAccount`'s.
@@ -206,7 +209,7 @@ impl GatewayFactory for JmapGatewayFactory {
                 Box::pin(async move {
                     let token =
                         read_token(&kube, "appPasswordTokenSecretRef", &secret_ref, local).await?;
-                    JmapClient::new(&url, token, http).map_err(GatewayFactoryError::InvalidSpec)
+                    JmapClient::new(&url, token, http).map_err(invalid_url)
                 })
             }));
         }

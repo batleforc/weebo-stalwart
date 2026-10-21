@@ -60,8 +60,26 @@ fn outcome_of<T>(result: &Result<T, GatewayError>) -> &'static str {
 
 pub struct JmapClient {
     base: Url,
-    token: String,
+    token: Token,
     http: Client,
+}
+
+/// The API key: its `Debug` never shows it.
+struct Token(String);
+
+impl std::fmt::Debug for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Token(<redacted>)")
+    }
+}
+
+/// `spec.url` can't serve as the API's base URL.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidUrl {
+    #[error("url {url:?}: {reason}")]
+    Unparsable { url: String, reason: String },
+    #[error("url {0:?}: not an http(s) base URL")]
+    NotHttpBase(String),
 }
 
 #[derive(Deserialize)]
@@ -74,14 +92,17 @@ struct Session {
 impl JmapClient {
     /// `url`: the instance's `spec.url`. `Err` when it can't serve as a
     /// base URL. `http` must not follow redirects ([`Self::client_builder`]).
-    pub fn new(url: &str, token: impl Into<String>, http: Client) -> Result<Self, String> {
-        let base = Url::parse(url).map_err(|e| format!("url {url:?}: {e}"))?;
+    pub fn new(url: &str, token: impl Into<String>, http: Client) -> Result<Self, InvalidUrl> {
+        let base = Url::parse(url).map_err(|e| InvalidUrl::Unparsable {
+            url: url.to_string(),
+            reason: e.to_string(),
+        })?;
         if base.cannot_be_a_base() || !matches!(base.scheme(), "http" | "https") {
-            return Err(format!("url {url:?}: not an http(s) base URL"));
+            return Err(InvalidUrl::NotHttpBase(url.to_string()));
         }
         Ok(Self {
             base,
-            token: token.into(),
+            token: Token(token.into()),
             http,
         })
     }
@@ -107,7 +128,7 @@ impl JmapClient {
 
     async fn send(&self, request: RequestBuilder) -> Result<Response, GatewayError> {
         let response = request
-            .bearer_auth(&self.token)
+            .bearer_auth(&self.token.0)
             .send()
             .await
             .map_err(|e| GatewayError::Unreachable(e.without_url().to_string()))?;
@@ -331,7 +352,7 @@ pub fn set_error(method: &str, error: &Value) -> GatewayError {
 mod tests {
     use super::*;
 
-    fn client(url: &str) -> Result<JmapClient, String> {
+    fn client(url: &str) -> Result<JmapClient, InvalidUrl> {
         JmapClient::new(url, "t", Client::new())
     }
 

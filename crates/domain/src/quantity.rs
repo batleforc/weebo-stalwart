@@ -1,10 +1,21 @@
 //! A Kubernetes quantity (`2Gi`, `500M`, `1.5Gi`) in bytes: what a
 //! `quota` becomes before it is compared with `quotas.maxDiskQuota`.
 
+/// Why a quantity was refused.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum QuantityError {
+    #[error("{quantity:?}: unknown unit {unit:?}")]
+    UnknownUnit { quantity: String, unit: String },
+    #[error("{0:?} is not a quantity (e.g. 2Gi, 500M)")]
+    Invalid(String),
+    #[error("{0:?} is too large")]
+    TooLarge(String),
+}
+
 /// The bytes `quantity` stands for, rounded up to a whole byte. Binary
 /// (`Ki` … `Ei`) and decimal (`k` … `E`) suffixes, a plain number, a
 /// decimal fraction; no exponent nor negative value.
-pub fn bytes(quantity: &str) -> Result<u64, String> {
+pub fn bytes(quantity: &str) -> Result<u64, QuantityError> {
     let q = quantity.trim();
     let split = q
         .find(|c: char| !(c.is_ascii_digit() || c == '.'))
@@ -24,9 +35,14 @@ pub fn bytes(quantity: &str) -> Result<u64, String> {
         "T" => 1_000_000_000_000,
         "P" => 1_000_000_000_000_000,
         "E" => 1_000_000_000_000_000_000,
-        _ => return Err(format!("{quantity:?}: unknown unit {suffix:?}")),
+        _ => {
+            return Err(QuantityError::UnknownUnit {
+                quantity: quantity.to_string(),
+                unit: suffix.to_string(),
+            });
+        }
     };
-    let invalid = || format!("{quantity:?} is not a quantity (e.g. 2Gi, 500M)");
+    let invalid = || QuantityError::Invalid(quantity.to_string());
     let (whole, fraction) = number.split_once('.').unwrap_or((number, ""));
     if whole.is_empty() && fraction.is_empty() || fraction.contains('.') || fraction.len() > 18 {
         return Err(invalid());
@@ -46,7 +62,7 @@ pub fn bytes(quantity: &str) -> Result<u64, String> {
         .checked_mul(multiplier)
         .and_then(|w| w.checked_add((fraction * multiplier).div_ceil(scale)))
         .ok_or_else(invalid)?;
-    u64::try_from(total).map_err(|_| format!("{quantity:?} is too large"))
+    u64::try_from(total).map_err(|_| QuantityError::TooLarge(quantity.to_string()))
 }
 
 #[cfg(test)]

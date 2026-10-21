@@ -90,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     };
     let http = http_client(&tls, ca.as_deref()).map_err(|e| anyhow::anyhow!(e))?;
-    let client = JmapClient::new(&args.url, args.token.trim(), http).map_err(anyhow::Error::msg)?;
+    let client = JmapClient::new(&args.url, args.token.trim(), http)?;
     let gateway = JmapGateway::new(client);
 
     // The cluster: to read the `StalwartDomain`s already linked (and, with

@@ -67,6 +67,28 @@ pub fn owner(sa: &ServiceAccount) -> SecretOwner<'_> {
     .formerly(api::ANNOTATIONS.previous_owner(&sa.metadata))
 }
 
+/// The keys a target receives. Its `Debug` hides the password.
+pub struct Credentials(BTreeMap<String, String>);
+
+impl std::ops::Deref for Credentials {
+    type Target = BTreeMap<String, String>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Credentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map()
+            .entries(self.0.iter().map(|(k, v)| {
+                let v = if k == keys::PASSWORD { "<redacted>" } else { v };
+                (k, v)
+            }))
+            .finish()
+    }
+}
+
 /// What every target receives: the submission service, the account's
 /// address as `username`, its App Password as `password`, and `from` — the
 /// first alias, or the address.
@@ -75,9 +97,9 @@ pub fn credentials(
     first_alias: Option<&str>,
     settings: &InstanceSettings,
     password: &str,
-) -> BTreeMap<String, String> {
+) -> Credentials {
     let from = first_alias.map_or_else(|| address.to_string(), String::from);
-    BTreeMap::from([
+    Credentials(BTreeMap::from([
         (keys::HOST.into(), settings.submission.host.clone()),
         (keys::PORT.into(), settings.submission.port.to_string()),
         (
@@ -87,7 +109,7 @@ pub fn credentials(
         (keys::USERNAME.into(), address.to_string()),
         (keys::PASSWORD.into(), password.to_string()),
         (keys::FROM.into(), from),
-    ])
+    ]))
 }
 
 pub async fn reconcile_service_account(
@@ -292,6 +314,22 @@ mod tests {
 
     fn main() -> BoundInstance {
         BoundInstance::cluster("main")
+    }
+
+    #[test]
+    fn credentials_never_debug_the_password() {
+        let settings = InstanceSettings {
+            submission: Default::default(),
+            default_backend: Default::default(),
+            vault: None,
+        };
+        let data = credentials("svc@weebo.internal", None, &settings, "s3cret");
+        assert_eq!(data[keys::PASSWORD], "s3cret");
+        let shown = format!("{data:?}");
+        assert!(
+            !shown.contains("s3cret") && shown.contains("<redacted>"),
+            "{shown}"
+        );
     }
 
     fn sa(spec: serde_json::Value) -> ServiceAccount {

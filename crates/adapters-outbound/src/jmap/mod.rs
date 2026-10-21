@@ -42,7 +42,7 @@ use futures::future::BoxFuture;
 use serde_json::{Value, json};
 use tokio::sync::OnceCell;
 
-pub use client::{JmapClient, MAX_BODY_BYTES, REQUEST_TIMEOUT};
+pub use client::{InvalidUrl, JmapClient, MAX_BODY_BYTES, REQUEST_TIMEOUT};
 
 /// The hashes of the management schemas this release speaks (base64url
 /// SHA-256, the last segment of `GET /api/schema`'s redirect), with the
