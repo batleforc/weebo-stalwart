@@ -6,8 +6,11 @@
 //! edited `url` or a new CA takes effect on the next reconcile. The second
 //! key, `appPasswordTokenSecretRef` (D24), is read the same way, by the
 //! gateway, the first time a call needs it (a `StalwartServiceAccount`'s).
+//! The HTTP client (its connection pool) is kept per URL, TLS options and
+//! CA: only a change to one of them builds a new one.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use api::common::TlsOptions;
 use api::{Instance, LocalInstance};
@@ -23,14 +26,51 @@ use crate::jmap::{JmapClient, JmapGateway};
 /// The operator's instances, both kinds: also its `InstanceDirectory`.
 pub type OperatorInstances = Instances<Instance, LocalInstance>;
 
+/// How many HTTP clients are kept: one per instance, with room for the
+/// ones a rotated CA or an edited URL leaves behind.
+const MAX_HTTP_CLIENTS: usize = 256;
+
+/// What an HTTP client depends on: the server, `insecureSkipVerify`, the
+/// CA's PEM.
+type HttpKey = (String, bool, Option<Vec<u8>>);
+
 pub struct JmapGatewayFactory {
     client: Client,
     instances: Arc<OperatorInstances>,
+    http: Mutex<HashMap<HttpKey, reqwest::Client>>,
 }
 
 impl JmapGatewayFactory {
     pub fn new(client: Client, instances: Arc<OperatorInstances>) -> Self {
-        Self { client, instances }
+        Self {
+            client,
+            instances,
+            http: Mutex::default(),
+        }
+    }
+
+    /// The HTTP client for `url` with these TLS settings: the one kept, or
+    /// a new one (an entry evicted when full).
+    fn http(
+        &self,
+        url: &str,
+        tls: &TlsOptions,
+        ca: Option<Vec<u8>>,
+    ) -> Result<reqwest::Client, GatewayFactoryError> {
+        let key = (url.to_string(), tls.insecure_skip_verify, ca);
+        // Plain values: a panic mid-insert leaves the map usable.
+        let mut clients = self.http.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(http) = clients.get(&key) {
+            return Ok(http.clone());
+        }
+        let http = http_client(tls, key.2.as_deref())?;
+        if clients.len() >= MAX_HTTP_CLIENTS
+            && let Some(old) = clients.keys().next().cloned()
+        {
+            clients.remove(&old);
+        }
+        clients.insert(key, http.clone());
+        Ok(http)
     }
 
     async fn ca(&self, tls: &TlsOptions) -> Result<Option<Vec<u8>>, GatewayFactoryError> {
@@ -152,7 +192,7 @@ impl GatewayFactory for JmapGatewayFactory {
         };
         let token = read_token(&self.client, "tokenSecretRef", &secret_ref, local).await?;
         let ca = self.ca(&tls).await?;
-        let http = http_client(&tls, ca.as_deref())?;
+        let http = self.http(url, &tls, ca)?;
         let client =
             JmapClient::new(url, token, http.clone()).map_err(GatewayFactoryError::InvalidSpec)?;
         let mut gateway = JmapGateway::new(client);

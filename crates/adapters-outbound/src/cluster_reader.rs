@@ -8,7 +8,8 @@
 //! The policies, the claiming kinds, the domains and the instances (whose
 //! servers a claim compares) are read from the binary's live
 //! reflector stores when it wires them in ([`KubeClusterReader::with_stores`]),
-//! from the API otherwise: a claim check reads every CR of four kinds, on
+//! from the API otherwise (so are the single domain and account lookups):
+//! a claim check reads every CR of four kinds, on
 //! every creation — from the API, a burst of N creations is N² objects
 //! listed and deserialized.
 
@@ -26,7 +27,7 @@ use std::sync::Arc;
 
 use kube::api::ListParams;
 use kube::core::{Selector, SelectorExt};
-use kube::runtime::reflector::Store;
+use kube::runtime::reflector::{ObjectRef, Store};
 use kube::{Api, Client, Resource, ResourceExt};
 use serde::de::DeserializeOwned;
 use weebo_kit_adapters::instance::STORE_READY_TIMEOUT;
@@ -127,6 +128,31 @@ impl KubeClusterReader {
             .collect())
     }
 
+    /// The `K` named `name` (in `namespace`, for a namespaced kind) on the
+    /// scope: from its store once listed, else read from the API.
+    async fn get<K: Stored>(
+        &self,
+        api: Api<K>,
+        namespace: Option<&str>,
+        name: &str,
+    ) -> Result<Option<Arc<K>>, ClusterError> {
+        let found = match K::store(&self.stores) {
+            Some(store) if wait_synced(store, STORE_READY_TIMEOUT).await => {
+                let mut key = ObjectRef::new(name);
+                if let Some(ns) = namespace {
+                    key = key.within(ns);
+                }
+                store.get(&key)
+            }
+            _ => api
+                .get_opt(name)
+                .await
+                .map_err(|e| ClusterError(format!("reading {} {name}: {e}", K::kind(&()))))?
+                .map(Arc::new),
+        };
+        Ok(found.filter(|o| self.selects(o.as_ref())))
+    }
+
     /// The operator's watch scope (`WatchScope`): the namespace it is
     /// limited to, its label selector, and whether it watches
     /// cluster-scoped kinds at all.
@@ -161,29 +187,46 @@ impl KubeClusterReader {
         }
     }
 
-    /// Every `K` visible to the operator, as `(Kind/namespace/name,
-    /// status, aliases)`.
-    async fn owners<K>(
+    /// Adds to `claimed` each of `names` a visible `K` owns: the address
+    /// it was confirmed for (`on_target` tells the server's), and its
+    /// aliases (in the same domain). Reads in place: a claim check visits
+    /// every CR, copying none of them.
+    async fn address_owners<K>(
         &self,
         aliases: fn(&K) -> &[String],
-    ) -> Result<Vec<(String, Option<Status>, Vec<String>)>, ClusterError>
+        names: &[String],
+        on_target: &(dyn Fn(&Status) -> bool + Sync),
+        claimed: &mut Vec<(String, String)>,
+    ) -> Result<(), ClusterError>
     where
         K: Resource<Scope = kube::core::NamespaceResourceScope> + Stored + HasStatus,
     {
-        Ok(self
-            .read(self.namespaced::<K>())
-            .await?
-            .into_iter()
-            .map(|cr| {
-                let id = format!(
-                    "{}/{}/{}",
-                    K::kind(&()),
-                    cr.namespace().unwrap_or_default(),
-                    cr.name_any()
-                );
-                (id, cr.status_of().cloned(), aliases(&cr).to_vec())
-            })
-            .collect())
+        for cr in self.read(self.namespaced::<K>()).await? {
+            let Some(address) = cr
+                .status_of()
+                .filter(|s| on_target(s))
+                .and_then(|s| s.address.as_deref())
+            else {
+                continue;
+            };
+            let domain = address.rsplit_once('@').map(|(_, d)| d).unwrap_or_default();
+            for name in names {
+                let owns = address.eq_ignore_ascii_case(name)
+                    || aliases(&cr)
+                        .iter()
+                        .any(|a| domain::mail::address(a, domain).eq_ignore_ascii_case(name));
+                if owns {
+                    let id = format!(
+                        "{}/{}/{}",
+                        K::kind(&()),
+                        cr.namespace().unwrap_or_default(),
+                        cr.name_any()
+                    );
+                    claimed.push((name.clone(), id));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn params(&self) -> ListParams {
@@ -266,47 +309,27 @@ impl ClusterReader for KubeClusterReader {
             servers
                 .iter()
                 .find(|(b, _)| b == bound)
-                .map(|(_, url)| url.clone())
+                .map(|(_, url)| url.as_str())
         };
         let Some(target) = server_of(Some(instance)) else {
             return Ok(claimed);
         };
         // Owning a remote object on the same server.
-        let on_target = |s: &Status| {
-            s.remote_id.is_some() && server_of(s.instance.as_ref()).as_ref() == Some(&target)
-        };
+        let on_target =
+            |s: &Status| s.remote_id.is_some() && server_of(s.instance.as_ref()) == Some(target);
         match kind {
             ClaimKind::Address => {
-                let mut owners = self.owners::<ServiceAccount>(|cr| &cr.spec.aliases).await?;
-                owners.extend(self.owners::<Account>(|cr| &cr.spec.aliases).await?);
-                owners.extend(self.owners::<Group>(|cr| &cr.spec.aliases).await?);
-                owners.extend(self.owners::<MailingList>(|cr| &cr.spec.aliases).await?);
                 // An address is owned by the CR it was confirmed for, and so
                 // are its aliases' (in the same domain).
-                let owned: Vec<(String, Vec<String>)> = owners
-                    .into_iter()
-                    .filter_map(|(id, status, aliases)| {
-                        let s = status.filter(|s| on_target(s))?;
-                        let address = s.address?;
-                        let domain = address
-                            .rsplit_once('@')
-                            .map(|(_, d)| d.to_string())
-                            .unwrap_or_default();
-                        let mut all: Vec<String> = aliases
-                            .iter()
-                            .map(|a| domain::mail::address(a, &domain))
-                            .collect();
-                        all.push(address);
-                        Some((id, all))
-                    })
-                    .collect();
-                for name in names {
-                    for (id, addresses) in &owned {
-                        if addresses.iter().any(|a| a.eq_ignore_ascii_case(name)) {
-                            claimed.push((name.clone(), id.clone()));
-                        }
-                    }
-                }
+                let c = &mut claimed;
+                self.address_owners::<ServiceAccount>(|cr| &cr.spec.aliases, names, &on_target, c)
+                    .await?;
+                self.address_owners::<Account>(|cr| &cr.spec.aliases, names, &on_target, c)
+                    .await?;
+                self.address_owners::<Group>(|cr| &cr.spec.aliases, names, &on_target, c)
+                    .await?;
+                self.address_owners::<MailingList>(|cr| &cr.spec.aliases, names, &on_target, c)
+                    .await?;
             }
             ClaimKind::Domain => {
                 if !self.cluster_kinds {
@@ -341,13 +364,11 @@ impl ClusterReader for KubeClusterReader {
         if !self.cluster_kinds {
             return Ok(None);
         }
-        let domain = Api::<Domain>::all(self.client.clone())
-            .get_opt(name)
-            .await
-            .map_err(|e| ClusterError(format!("reading StalwartDomain {name}: {e}")))?
-            .filter(|d| self.selects(d));
+        let domain = self
+            .get(Api::<Domain>::all(self.client.clone()), None, name)
+            .await?;
         Ok(domain.map(|d| {
-            let status = d.status.unwrap_or_default();
+            let status = d.status.clone().unwrap_or_default();
             let ready = weebo_kit_api::status::ready(&status.conditions)
                 .is_some_and(|c| c.status == "True");
             DomainState {
@@ -371,15 +392,19 @@ impl ClusterReader for KubeClusterReader {
         {
             return Ok(None);
         }
-        let account = Api::<Account>::namespaced(self.client.clone(), namespace)
-            .get_opt(name)
-            .await
-            .map_err(|e| ClusterError(format!("reading StalwartAccount {namespace}/{name}: {e}")))?
-            .filter(|a| self.selects(a));
-        Ok(account
-            .and_then(|a| a.status)
-            .filter(|s| s.remote_id.is_some())
-            .and_then(|s| s.address))
+        let account = self
+            .get(
+                Api::<Account>::namespaced(self.client.clone(), namespace),
+                Some(namespace),
+                name,
+            )
+            .await?;
+        Ok(account.and_then(|a| {
+            a.status
+                .as_ref()
+                .filter(|s| s.remote_id.is_some())
+                .and_then(|s| s.address.clone())
+        }))
     }
 
     async fn instance_settings(
