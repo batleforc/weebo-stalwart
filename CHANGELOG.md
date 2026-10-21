@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.1.2](https://github.com/batleforc/weebo-stalwart/compare/049effd0e2c0dc70e923759d45319afec4f3d50b..v0.1.2) - 2026-10-21
+#### Bug Fixes
+- weebo-good-practice review: house lints, bounded I/O, typed errors (#3) - ([049effd](https://github.com/batleforc/weebo-stalwart/commit/049effd0e2c0dc70e923759d45319afec4f3d50b)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.1.1](https://github.com/batleforc/weebo-stalwart/compare/3b9a71b8468e8773df4ebe052a62081ab7262e0e..v0.1.1) - 2026-10-21
 #### Miscellaneous Chores
 - (**kit**) weebo-operator-kit v0.22.1 (#2) - ([3b9a71b](https://github.com/batleforc/weebo-stalwart/commit/3b9a71b8468e8773df4ebe052a62081ab7262e0e)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
