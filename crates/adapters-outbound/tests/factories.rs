@@ -4,6 +4,15 @@
 //! instance's — its CA) against a mock Stalwart, and `StalwartSecretStoreFactory` (where
 //! each kind of instance may write).
 
+// Test helpers outside `#[test]`: a fixture that does not hold fails
+// the test that called it, with its message.
+#![expect(
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test helpers: a panic is a failed test"
+)]
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

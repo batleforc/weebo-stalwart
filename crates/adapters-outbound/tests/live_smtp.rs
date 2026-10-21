@@ -33,6 +33,16 @@
 //! Ignored by default: run with `--ignored` (each test uses its own
 //! domain; [`SERIAL`] runs them one at a time).
 
+// Test helpers outside `#[test]`: a fixture that does not hold fails
+// the test that called it, with its message.
+#![expect(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test helpers: a panic is a failed test"
+)]
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -687,7 +697,8 @@ async fn fake_idp() -> String {
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 );
-                let _ = tcp.write_all(answer.as_bytes()).await;
+                // Err: the client hung up first; nothing to answer.
+                tcp.write_all(answer.as_bytes()).await.ok();
             });
         }
     });
@@ -844,12 +855,15 @@ impl Drop for Oidc {
             self.operator_account.clone(),
             self.key.0.clone(),
         );
-        let _ = std::thread::spawn(move || {
+        let undone = std::thread::spawn(move || {
             tokio::runtime::Runtime::new()
                 .unwrap()
                 .block_on(Self::undo(&live, &directory, &account, &key));
         })
         .join();
+        if undone.is_err() {
+            eprintln!("undoing the live changes failed: see the panic above");
+        }
     }
 }
 

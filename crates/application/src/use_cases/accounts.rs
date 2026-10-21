@@ -72,7 +72,10 @@ pub struct Subject<'a> {
 }
 
 impl<'a> Subject<'a> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one per field of the subject, each named at the call site"
+    )]
     pub fn new(
         cr_kind: &'static str,
         kind: Kind,

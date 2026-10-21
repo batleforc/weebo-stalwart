@@ -54,8 +54,10 @@ pub fn rotation(account: &str, previous: &[String]) -> Value {
             },
         }},
     });
-    if !previous.is_empty() {
-        args["destroy"] = json!(previous);
+    if !previous.is_empty()
+        && let Some(args) = args.as_object_mut()
+    {
+        args.insert("destroy".into(), json!(previous));
     }
     args
 }

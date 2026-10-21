@@ -21,6 +21,13 @@ use serde_json::{Value, json};
 /// Per-request timeout: a hung server must not hold a reconcile forever.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// The largest JSON answer read: generous for any session or method
+/// response (thousands of objects), but `spec.url` is the tenant's, and a
+/// server streaming an endless body must not exhaust the operator's memory.
+pub const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
+/// How much of an error answer is read: its start is all the message keeps.
+const MAX_ERROR_BODY_BYTES: usize = 4 * 1024;
+
 /// What the `x:` methods need in `using` (the official CLI's).
 const USING: [&str; 2] = ["urn:ietf:params:jmap:core", "urn:stalwart:jmap"];
 /// The capability whose primary account the `x:` methods act in.
@@ -53,8 +60,26 @@ fn outcome_of<T>(result: &Result<T, GatewayError>) -> &'static str {
 
 pub struct JmapClient {
     base: Url,
-    token: String,
+    token: Token,
     http: Client,
+}
+
+/// The API key: its `Debug` never shows it.
+struct Token(String);
+
+impl std::fmt::Debug for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Token(<redacted>)")
+    }
+}
+
+/// `spec.url` can't serve as the API's base URL.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidUrl {
+    #[error("url {url:?}: {reason}")]
+    Unparsable { url: String, reason: String },
+    #[error("url {0:?}: not an http(s) base URL")]
+    NotHttpBase(String),
 }
 
 #[derive(Deserialize)]
@@ -67,14 +92,17 @@ struct Session {
 impl JmapClient {
     /// `url`: the instance's `spec.url`. `Err` when it can't serve as a
     /// base URL. `http` must not follow redirects ([`Self::client_builder`]).
-    pub fn new(url: &str, token: impl Into<String>, http: Client) -> Result<Self, String> {
-        let base = Url::parse(url).map_err(|e| format!("url {url:?}: {e}"))?;
+    pub fn new(url: &str, token: impl Into<String>, http: Client) -> Result<Self, InvalidUrl> {
+        let base = Url::parse(url).map_err(|e| InvalidUrl::Unparsable {
+            url: url.to_string(),
+            reason: e.to_string(),
+        })?;
         if base.cannot_be_a_base() || !matches!(base.scheme(), "http" | "https") {
-            return Err(format!("url {url:?}: not an http(s) base URL"));
+            return Err(InvalidUrl::NotHttpBase(url.to_string()));
         }
         Ok(Self {
             base,
-            token: token.into(),
+            token: Token(token.into()),
             http,
         })
     }
@@ -88,6 +116,10 @@ impl JmapClient {
     }
 
     /// `{url}/<segments…>`, each segment percent-encoded.
+    #[expect(
+        clippy::expect_used,
+        reason = "`new` refuses a URL that cannot be a base, the only error of `path_segments_mut`"
+    )]
     pub(crate) fn url(&self, segments: &[&str]) -> Url {
         let mut url = self.base.clone();
         url.path_segments_mut()
@@ -100,7 +132,7 @@ impl JmapClient {
 
     async fn send(&self, request: RequestBuilder) -> Result<Response, GatewayError> {
         let response = request
-            .bearer_auth(&self.token)
+            .bearer_auth(&self.token.0)
             .send()
             .await
             .map_err(|e| GatewayError::Unreachable(e.without_url().to_string()))?;
@@ -108,7 +140,11 @@ impl JmapClient {
         if status.is_success() || status.is_redirection() {
             return Ok(response);
         }
-        let body = response.text().await.unwrap_or_default();
+        // Only the message's start: a broken body still reports the status.
+        let body = read_body(response, MAX_ERROR_BODY_BYTES)
+            .await
+            .unwrap_or_else(|(head, _)| head);
+        let body = String::from_utf8_lossy(&body);
         let why = format!("{status}: {}", body.chars().take(200).collect::<String>());
         Err(match status {
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => GatewayError::Unauthorized(why),
@@ -127,8 +163,7 @@ impl JmapClient {
             let response = self
                 .send(self.http.get(self.url(&["jmap", "session"])))
                 .await?;
-            let session: Session = response
-                .json()
+            let session: Session = json_body(response)
                 .await
                 .map_err(|e| GatewayError::Api(format!("unexpected session: {e}")))?;
             session
@@ -198,8 +233,7 @@ impl JmapClient {
             let response = self
                 .send(self.http.post(self.url(&["jmap"])).json(&body))
                 .await?;
-            let mut answer: Value = response
-                .json()
+            let mut answer: Value = json_body(response)
                 .await
                 .map_err(|e| GatewayError::Api(format!("unexpected answer to {method}: {e}")))?;
             let reply = answer
@@ -225,6 +259,34 @@ impl JmapClient {
         );
         result
     }
+}
+
+/// The body, read chunk by chunk up to `limit` bytes. `Err` carries what
+/// was read before the transport failed or the limit was crossed.
+async fn read_body(mut response: Response, limit: usize) -> Result<Vec<u8>, (Vec<u8>, String)> {
+    let mut body = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(None) => return Ok(body),
+            Ok(Some(chunk)) => {
+                if chunk.len() > limit.saturating_sub(body.len()) {
+                    let room = limit.saturating_sub(body.len());
+                    body.extend_from_slice(chunk.get(..room).unwrap_or_default());
+                    return Err((body, format!("body larger than {limit} bytes")));
+                }
+                body.extend_from_slice(&chunk);
+            }
+            Err(e) => return Err((body, e.without_url().to_string())),
+        }
+    }
+}
+
+/// The body as JSON, read up to [`MAX_BODY_BYTES`].
+async fn json_body<T: serde::de::DeserializeOwned>(response: Response) -> Result<T, String> {
+    let body = read_body(response, MAX_BODY_BYTES)
+        .await
+        .map_err(|(_, why)| why)?;
+    serde_json::from_slice(&body).map_err(|e| e.to_string())
 }
 
 fn describe(error: &Value) -> String {
@@ -294,7 +356,7 @@ pub fn set_error(method: &str, error: &Value) -> GatewayError {
 mod tests {
     use super::*;
 
-    fn client(url: &str) -> Result<JmapClient, String> {
+    fn client(url: &str) -> Result<JmapClient, InvalidUrl> {
         JmapClient::new(url, "t", Client::new())
     }
 

@@ -12,6 +12,15 @@
 //! without failing; `WEEBO_PERF_BASELINE=<previous json>` adds the change
 //! from a previous run. The report lands in `target/perf/`.
 
+// Test helpers outside `#[test]`: a fixture that does not hold fails
+// the test that called it, with its message.
+#![expect(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    reason = "test helpers: a panic is a failed test"
+)]
+
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -98,7 +107,7 @@ impl Store {
                         json!({"notCreated": {"new": {"type": "primaryKeyViolation"}}})
                     } else {
                         let mut next = self.next_id.lock().unwrap();
-                        *next += 1;
+                        *next = next.saturating_add(1);
                         let id = format!("i{next}");
                         let mut object = new.clone();
                         object.insert("id".into(), id.clone().into());
@@ -265,8 +274,9 @@ async fn cycle(
 #[tokio::test]
 #[ignore = "a perf run (minutes, release build): `task perf`"]
 async fn the_operator_fits_a_small_cluster() {
-    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
-    let objects = env_or("PERF_OBJECTS", 200) as usize;
+    // Err: another test installed it first, which is as good.
+    tracing_subscriber::fmt().with_test_writer().try_init().ok();
+    let objects = usize::try_from(env_or("PERF_OBJECTS", 200)).expect("PERF_OBJECTS fits a usize");
     let idle = Duration::from_secs(env_or("PERF_IDLE_SECS", 30));
     let timeout = Duration::from_secs(300);
 

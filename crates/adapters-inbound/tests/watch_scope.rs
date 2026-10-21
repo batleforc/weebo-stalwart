@@ -11,6 +11,10 @@
 //! The rules below mirror the library chart's `clusterRole` and
 //! `watchRole` (`weebo-operator.kindRules`): keep them in step.
 
+// Test helpers outside `#[test]`: a fixture that does not hold fails
+// the test that called it, with its message.
+#![expect(clippy::unwrap_used, reason = "test helpers: a panic is a failed test")]
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -252,7 +256,8 @@ async fn operator_client(cluster: &EnvTestCluster) -> Client {
 
 #[tokio::test]
 async fn a_namespaced_scope_runs_on_namespaced_rbac_and_sees_only_its_objects() {
-    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    // Err: another test installed it first, which is as good.
+    tracing_subscriber::fmt().with_test_writer().try_init().ok();
     let cluster = testkit::envtest::start().await;
     let admin = cluster.client();
     grant_rbac(&admin, "team-a", true).await;
@@ -365,7 +370,8 @@ async fn a_namespaced_scope_runs_on_namespaced_rbac_and_sees_only_its_objects() 
 
 #[tokio::test]
 async fn a_full_namespaced_operator_runs_on_one_role_only() {
-    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    // Err: another test installed it first, which is as good.
+    tracing_subscriber::fmt().with_test_writer().try_init().ok();
     let cluster = testkit::envtest::start().await;
     let admin = cluster.client();
     grant_rbac(&admin, "team-a", false).await;

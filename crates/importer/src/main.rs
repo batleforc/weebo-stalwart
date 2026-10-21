@@ -52,7 +52,14 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // Two providers are linked (ring, aws-lc-rs): pick one. `Err`: already
+    // installed, which is as good.
+    if rustls::crypto::ring::default_provider()
+        .install_default()
+        .is_err()
+    {
+        eprintln!("note: a rustls crypto provider was already installed");
+    }
     let args = Args::parse();
 
     let mut yaml = String::new();
@@ -83,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     };
     let http = http_client(&tls, ca.as_deref()).map_err(|e| anyhow::anyhow!(e))?;
-    let client = JmapClient::new(&args.url, args.token.trim(), http).map_err(anyhow::Error::msg)?;
+    let client = JmapClient::new(&args.url, args.token.trim(), http)?;
     let gateway = JmapGateway::new(client);
 
     // The cluster: to read the `StalwartDomain`s already linked (and, with
@@ -107,17 +114,12 @@ async fn main() -> anyhow::Result<()> {
     match (args.apply, kube) {
         (true, Some(kube)) => {
             let summary = apply_all(&kube, &planned, args.force).await;
+            let failed = summary.failed.saturating_add(refused.len());
             eprintln!(
-                "{} linked, {} already linked, {} failed",
-                summary.adopted,
-                summary.skipped,
-                summary.failed + refused.len()
+                "{} linked, {} already linked, {failed} failed",
+                summary.adopted, summary.skipped,
             );
-            anyhow::ensure!(
-                summary.failed == 0 && refused.is_empty(),
-                "{} CR(s) could not be linked",
-                summary.failed + refused.len()
-            );
+            anyhow::ensure!(failed == 0, "{failed} CR(s) could not be linked");
         }
         _ => {
             print!("{}", to_yaml(&planned)?);

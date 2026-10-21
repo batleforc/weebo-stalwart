@@ -9,6 +9,10 @@
 //! Ignored by default: run with `--ignored`, one test at a time is not
 //! needed (each uses its own domain).
 
+// Test helpers outside `#[test]`: a fixture that does not hold fails
+// the test that called it, with its message.
+#![expect(clippy::unwrap_used, reason = "test helpers: a panic is a failed test")]
+
 use adapters_outbound::jmap::SUPPORTED_SCHEMAS;
 use adapters_outbound::{JmapClient, JmapGateway};
 use application::ports::{GatewayError, RemoteGateway};

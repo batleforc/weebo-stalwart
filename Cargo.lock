@@ -45,6 +45,7 @@ dependencies = [
  "serde",
  "serde_json",
  "testkit",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-rustls",
  "tracing",
@@ -973,6 +974,7 @@ dependencies = [
 name = "domain"
 version = "0.1.1"
 dependencies = [
+ "thiserror 2.0.21",
  "weebo-kit-domain",
 ]
 
@@ -1655,6 +1657,7 @@ dependencies = [
  "serde_json",
  "serde_norway",
  "testkit",
+ "thiserror 2.0.21",
  "tokio",
  "tracing-subscriber",
  "weebo-kit-adapters",

@@ -58,7 +58,7 @@ async fn operator() -> anyhow::Result<()> {
 /// operator stopped, new CRDs applied, then this, then the operator.
 async fn migrate_instance_ref() -> anyhow::Result<()> {
     let dry_run = std::env::args().any(|a| a == "--dry-run");
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    install_crypto_provider();
     let client = Client::try_default().await?;
     let kinds = [
         ApiResource::erase::<Domain>(&()),
@@ -87,11 +87,20 @@ async fn migrate_instance_ref() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `ring` and `aws-lc-rs` are both linked transitively (`kube`'s rustls
+/// vs. reqwest's); rustls refuses to pick a default provider when more
+/// than one is present. `Err`: one is installed already, which is as good.
+fn install_crypto_provider() {
+    if rustls::crypto::ring::default_provider()
+        .install_default()
+        .is_err()
+    {
+        tracing::debug!("a rustls crypto provider was already installed");
+    }
+}
+
 async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
-    // `ring` and `aws-lc-rs` are both linked transitively (`kube`'s rustls
-    // vs. reqwest's); rustls refuses to pick a default provider when more
-    // than one is present.
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    install_crypto_provider();
 
     telemetry.serve_metrics().await?;
     // `<prefix>_leader`: 1 on the replica holding the lease.
@@ -252,6 +261,11 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     // instead of making the next leader wait out the TTL.
     leadership.release().await;
     // Bounded: the drain started with the signal, long before.
-    let _ = tokio::time::timeout(Duration::from_secs(30), server.stopped()).await;
+    if tokio::time::timeout(Duration::from_secs(30), server.stopped())
+        .await
+        .is_err()
+    {
+        tracing::warn!("the HTTP server did not stop within 30s; exiting anyway");
+    }
     Ok(())
 }

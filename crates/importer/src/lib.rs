@@ -24,11 +24,10 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 
 use adapters_outbound::{KubeClusterReader, OperatorInstances};
-use anyhow::{Context, bail};
 use api::common::InstanceRef;
 use api::{Account, Domain, Group, MailingList, ServiceAccount, Status};
 use application::ports::{
-    BoundInstance, ClaimKind, ClusterReader, InstanceDirectory, RemoteGateway,
+    BoundInstance, ClaimKind, ClusterError, ClusterReader, InstanceDirectory, RemoteGateway,
 };
 use application::use_cases::import::{Found, IMPORT_ROTATION_PREFIX, Wanted, locate};
 use domain::account::AccountType;
@@ -39,7 +38,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::json;
-use weebo_kit_adapters::{Adopter, Adoption};
+use weebo_kit_adapters::{AdoptError, Adopter, Adoption};
 
 pub use weebo_kit_adapters::Summary;
 
@@ -50,6 +49,48 @@ const ADOPTER: Adopter = Adopter {
     field_manager: FIELD_MANAGER,
     annotations: api::ANNOTATIONS,
 };
+
+/// Why the input could not be read, or the plan written.
+#[derive(Debug, thiserror::Error)]
+pub enum ParseError {
+    #[error("document {document}: not YAML: {source}")]
+    NotYaml {
+        document: usize,
+        source: serde_norway::Error,
+    },
+    #[error(
+        "document {document}: apiVersion {api_version:?} is not {}/v1alpha1",
+        api::GROUP
+    )]
+    ApiVersion {
+        document: usize,
+        api_version: String,
+    },
+    #[error("document {document}: kind {kind:?} has nothing to import")]
+    Kind { document: usize, kind: String },
+    #[error("document {document}: {source}")]
+    Invalid {
+        document: usize,
+        source: serde_json::Error,
+    },
+    #[error("writing a CR as YAML: {0}")]
+    Yaml(#[source] serde_norway::Error),
+}
+
+/// Why a planned CR was not linked.
+#[derive(Debug, thiserror::Error)]
+pub enum LinkError {
+    #[error(transparent)]
+    Cluster(#[from] ClusterError),
+    #[error("RemoteObjectClaimed: {kind} {name:?} on this server is already owned by {other}")]
+    Claimed {
+        kind: &'static str,
+        name: String,
+        other: String,
+    },
+    #[error(transparent)]
+    Adopt(#[from] AdoptError),
+}
 
 /// A CR to link.
 #[derive(Debug, Clone)]
@@ -76,32 +117,52 @@ macro_rules! each {
 
 /// The CRs of a multi-document YAML stream (empty documents skipped);
 /// a namespaced CR without a namespace is put in `namespace`.
-pub fn parse(yaml: &str, namespace: &str) -> anyhow::Result<Vec<Cr>> {
+pub fn parse(yaml: &str, namespace: &str) -> Result<Vec<Cr>, ParseError> {
     let mut crs = Vec::new();
     for (i, document) in serde_norway::Deserializer::from_str(yaml).enumerate() {
-        let value = serde_json::Value::deserialize(document)
-            .with_context(|| format!("document {}: not YAML", i + 1))?;
+        let n = i.saturating_add(1);
+        let value =
+            serde_json::Value::deserialize(document).map_err(|source| ParseError::NotYaml {
+                document: n,
+                source,
+            })?;
         if value.is_null() {
             continue;
         }
-        let api_version = value["apiVersion"].as_str().unwrap_or_default();
+        let field = |key: &str| {
+            value
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
+        let api_version = field("apiVersion");
         if api_version != format!("{}/v1alpha1", api::GROUP) {
-            bail!(
-                "document {}: apiVersion {api_version:?} is not {}/v1alpha1",
-                i + 1,
-                api::GROUP
-            );
+            return Err(ParseError::ApiVersion {
+                document: n,
+                api_version,
+            });
         }
-        let kind = value["kind"].as_str().unwrap_or_default().to_string();
+        let kind = field("kind");
+        let invalid = |source| ParseError::Invalid {
+            document: n,
+            source,
+        };
         let mut cr = match kind.as_str() {
-            "StalwartDomain" => Cr::Domain(Box::new(serde_json::from_value(value)?)),
-            "StalwartServiceAccount" => {
-                Cr::ServiceAccount(Box::new(serde_json::from_value(value)?))
+            "StalwartDomain" => {
+                Cr::Domain(Box::new(serde_json::from_value(value).map_err(invalid)?))
             }
-            "StalwartAccount" => Cr::Account(Box::new(serde_json::from_value(value)?)),
-            "StalwartGroup" => Cr::Group(Box::new(serde_json::from_value(value)?)),
-            "StalwartMailingList" => Cr::MailingList(Box::new(serde_json::from_value(value)?)),
-            other => bail!("document {}: kind {other:?} has nothing to import", i + 1),
+            "StalwartServiceAccount" => {
+                Cr::ServiceAccount(Box::new(serde_json::from_value(value).map_err(invalid)?))
+            }
+            "StalwartAccount" => {
+                Cr::Account(Box::new(serde_json::from_value(value).map_err(invalid)?))
+            }
+            "StalwartGroup" => Cr::Group(Box::new(serde_json::from_value(value).map_err(invalid)?)),
+            "StalwartMailingList" => {
+                Cr::MailingList(Box::new(serde_json::from_value(value).map_err(invalid)?))
+            }
+            _ => return Err(ParseError::Kind { document: n, kind }),
         };
         if !matches!(cr, Cr::Domain(_)) {
             each!(&mut cr, |c| {
@@ -333,11 +394,13 @@ async fn domain_of(
 
 /// Every planned CR as one multi-document YAML stream, `status` included
 /// (ignored by `kubectl apply`, kept as a record of the linked ids).
-pub fn to_yaml(planned: &[Planned]) -> anyhow::Result<String> {
+pub fn to_yaml(planned: &[Planned]) -> Result<String, ParseError> {
     let mut out = String::new();
     for p in planned {
         out.push_str("---\n");
-        out.push_str(&each!(&p.cr, |c| serde_norway::to_string(c.as_ref()))?);
+        out.push_str(
+            &each!(&p.cr, |c| serde_norway::to_string(c.as_ref())).map_err(ParseError::Yaml)?,
+        );
     }
     Ok(out)
 }
@@ -362,7 +425,7 @@ pub async fn apply_all(client: &Client, planned: &[Planned], force: bool) -> Sum
             .await),
             Err(e) => Err(e),
         };
-        // The claim check fails with a `String`, not an `AdoptError`: a
+        // The claim check fails with a `LinkError`, not an `AdoptError`: a
         // failure is counted here rather than through `Summary::record`.
         match result {
             Ok(adoption) => summary.record(&Ok(adoption)),
@@ -382,7 +445,7 @@ async fn claimed(
     reader: &KubeClusterReader,
     instances: &OperatorInstances,
     p: &Planned,
-) -> Result<Option<BoundInstance>, String> {
+) -> Result<Option<BoundInstance>, LinkError> {
     let recorded = p.cr.status().and_then(|s| s.instance.as_ref());
     // No instance to resolve yet: no server to compare claims on.
     let Ok(instance) = instances
@@ -394,15 +457,13 @@ async fn claimed(
     let (kind, names) = p.cr.claims(&p.found);
     let me = p.cr.id();
     for name in names {
-        let others = reader
-            .claimants(kind, &name, &instance)
-            .await
-            .map_err(|e| e.to_string())?;
+        let others = reader.claimants(kind, &name, &instance).await?;
         if let Some(other) = others.into_iter().find(|o| *o != me) {
-            return Err(format!(
-                "RemoteObjectClaimed: {} {name:?} on this server is already owned by {other}",
-                kind.as_str()
-            ));
+            return Err(LinkError::Claimed {
+                kind: kind.as_str(),
+                name,
+                other,
+            });
         }
     }
     Ok(Some(instance))
@@ -414,7 +475,7 @@ async fn adopt<K>(
     found: &Found,
     instance: Option<&BoundInstance>,
     force: bool,
-) -> Result<Adoption, String>
+) -> Result<Adoption, LinkError>
 where
     K: Resource<DynamicType = ()> + Clone + Debug + Serialize + DeserializeOwned + HasSeed,
 {
@@ -429,7 +490,7 @@ where
             force,
         )
         .await
-        .map_err(|e| e.to_string())
+        .map_err(LinkError::from)
 }
 
 /// The status and the API of every kind the importer links.

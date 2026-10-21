@@ -4,6 +4,10 @@
 //! scripted Stalwart, and exits as soon as the lease is lost. (The perf
 //! test covers the SIGTERM shutdown.)
 
+// Test helpers outside `#[test]`: a fixture that does not hold fails
+// the test that called it, with its message.
+#![expect(clippy::unwrap_used, reason = "test helpers: a panic is a failed test")]
+
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -29,7 +33,8 @@ struct Running(std::process::Child);
 
 impl Drop for Running {
     fn drop(&mut self) {
-        let _ = self.0.kill();
+        // Err: it exited already.
+        self.0.kill().ok();
     }
 }
 

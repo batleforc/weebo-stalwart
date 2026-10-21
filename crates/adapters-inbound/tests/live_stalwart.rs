@@ -6,6 +6,10 @@
 //! a reconcile with nothing to change writes nothing to the real server
 //! ("reste silencieux", RFC 0003 rule 3).
 
+// Test helpers outside `#[test]`: a fixture that does not hold fails
+// the test that called it, with its message.
+#![expect(clippy::unwrap_used, reason = "test helpers: a panic is a failed test")]
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -204,7 +208,8 @@ async fn events_in(client: &Client, namespace: &str, name: &str, reason: &str) -
 #[tokio::test]
 #[ignore = "needs a real Stalwart: task stalwart:container:start"]
 async fn instance_and_domain_against_a_real_stalwart() {
-    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    // Err: another test installed it first, which is as good.
+    tracing_subscriber::fmt().with_test_writer().try_init().ok();
     let live = LiveStalwart::from_env();
     let cluster = testkit::envtest::start().await;
     let client = cluster.client();
@@ -371,7 +376,8 @@ where
 #[tokio::test]
 #[ignore = "needs a real Stalwart: task stalwart:container:start"]
 async fn accounts_against_a_real_stalwart() {
-    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    // Err: another test installed it first, which is as good.
+    tracing_subscriber::fmt().with_test_writer().try_init().ok();
     let live = LiveStalwart::from_env();
     let cluster = testkit::envtest::start().await;
     let client = cluster.client();

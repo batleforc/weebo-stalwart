@@ -3,7 +3,7 @@
 //! explicitly. Every reconcile updates `weebo_stalwart_accounts{state}`.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use api::Account;
 use api::common::{DeletionPolicy, InstanceRef};
@@ -33,7 +33,50 @@ pub async fn run(client: Client, ctx: Arc<Ctx>) {
 pub const STATES: [&str; 3] = ["Active", "Locked", "NotReady"];
 
 /// The state each account (`namespace/name`) last reached.
-static ACCOUNTS: LazyLock<Mutex<BTreeMap<String, &'static str>>> = LazyLock::new(Mutex::default);
+static ACCOUNTS: LazyLock<Mutex<Tally>> = LazyLock::new(Mutex::default);
+
+/// The state of each account, and how many are in each of [`STATES`]:
+/// kept up to date one account at a time, never recounted.
+#[derive(Default)]
+pub struct Tally {
+    states: BTreeMap<String, &'static str>,
+    counts: [u64; 3],
+}
+
+impl Tally {
+    /// Records `state` for `key` (`None`: gone).
+    pub fn set(&mut self, key: String, state: Option<&'static str>) {
+        let previous = match state {
+            Some(state) => {
+                self.bump(state, true);
+                self.states.insert(key, state)
+            }
+            None => self.states.remove(&key),
+        };
+        if let Some(previous) = previous {
+            self.bump(previous, false);
+        }
+    }
+
+    fn bump(&mut self, state: &str, up: bool) {
+        if let Some(count) = STATES
+            .iter()
+            .position(|s| *s == state)
+            .and_then(|i| self.counts.get_mut(i))
+        {
+            *count = if up {
+                count.saturating_add(1)
+            } else {
+                count.saturating_sub(1)
+            };
+        }
+    }
+
+    /// How many accounts are in each state.
+    pub fn counts(&self) -> impl Iterator<Item = (&'static str, u64)> + '_ {
+        STATES.into_iter().zip(self.counts)
+    }
+}
 
 static GAUGE: LazyLock<Gauge<u64>> = LazyLock::new(|| {
     opentelemetry::global::meter(super::FIELD_MANAGER)
@@ -52,11 +95,6 @@ pub fn state_of(account: &Account, outcome: &Outcome) -> &'static str {
     }
 }
 
-/// How many accounts are in each state.
-pub fn counts(accounts: &BTreeMap<String, &'static str>) -> [(&'static str, u64); 3] {
-    STATES.map(|s| (s, accounts.values().filter(|v| **v == s).count() as u64))
-}
-
 fn key(account: &Account) -> String {
     format!(
         "{}/{}",
@@ -67,12 +105,10 @@ fn key(account: &Account) -> String {
 
 /// Records `state` for `account` (`None`: gone), then the gauge.
 fn record(account: &Account, state: Option<&'static str>) {
-    let mut accounts = ACCOUNTS.lock().unwrap();
-    match state {
-        Some(state) => accounts.insert(key(account), state),
-        None => accounts.remove(&key(account)),
-    };
-    for (state, count) in counts(&accounts) {
+    // A map of plain values: a panic mid-insert leaves it consistent.
+    let mut accounts = ACCOUNTS.lock().unwrap_or_else(PoisonError::into_inner);
+    accounts.set(key(account), state);
+    for (state, count) in accounts.counts() {
         GAUGE.record(count, &[KeyValue::new("state", state)]);
     }
 }
@@ -136,13 +172,18 @@ mod tests {
         assert_eq!(state_of(&account, &Outcome::synced(None, "ok")), "Locked");
         let failed = Outcome::failed(Failure::new(domain::error::ReasonCode::RemoteError, "x"));
         assert_eq!(state_of(&account, &failed), "NotReady");
-        let accounts = BTreeMap::from([
-            ("mail/a".to_string(), "Active"),
-            ("mail/b".to_string(), "Locked"),
-            ("mail/c".to_string(), "Active"),
-        ]);
+        let mut accounts = Tally::default();
+        accounts.set("mail/a".into(), Some("Active"));
+        accounts.set("mail/b".into(), Some("Active"));
+        accounts.set("mail/c".into(), Some("Active"));
+        // A change of state moves the account, a deletion drops it.
+        accounts.set("mail/b".into(), Some("Locked"));
+        accounts.set("mail/c".into(), None);
+        accounts.set("mail/d".into(), None);
+        accounts.set("mail/e".into(), Some("NotReady"));
+        accounts.set("mail/e".into(), Some("Active"));
         assert_eq!(
-            counts(&accounts),
+            accounts.counts().collect::<Vec<_>>(),
             [("Active", 2), ("Locked", 1), ("NotReady", 0)]
         );
     }

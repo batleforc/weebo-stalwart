@@ -3,6 +3,15 @@
 //! `--apply` into envtest through `KUBECONFIG` (idempotent), and a non-zero
 //! exit when an object can't be found or the input can't be read.
 
+// Test helpers outside `#[test]`: a fixture that does not hold fails
+// the test that called it, with its message.
+#![expect(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    reason = "test helpers: a panic is a failed test"
+)]
+
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
