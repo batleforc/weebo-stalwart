@@ -362,10 +362,15 @@ pub async fn apply_all(client: &Client, planned: &[Planned], force: bool) -> Sum
             .await),
             Err(e) => Err(e),
         };
-        if let Err(e) = &result {
-            eprintln!("error: {}: {e}", p.cr.id());
+        // The claim check fails with a `String`, not an `AdoptError`: a
+        // failure is counted here rather than through `Summary::record`.
+        match result {
+            Ok(adoption) => summary.record(&Ok(adoption)),
+            Err(e) => {
+                eprintln!("error: {}: {e}", p.cr.id());
+                summary.failed = summary.failed.saturating_add(1);
+            }
         }
-        summary.record(&result);
     }
     summary
 }
@@ -424,6 +429,7 @@ where
             force,
         )
         .await
+        .map_err(|e| e.to_string())
 }
 
 /// The status and the API of every kind the importer links.
