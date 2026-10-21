@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.1.1](https://github.com/batleforc/weebo-stalwart/compare/3b9a71b8468e8773df4ebe052a62081ab7262e0e..v0.1.1) - 2026-10-21
+#### Miscellaneous Chores
+- (**kit**) weebo-operator-kit v0.22.1 (#2) - ([3b9a71b](https://github.com/batleforc/weebo-stalwart/commit/3b9a71b8468e8773df4ebe052a62081ab7262e0e)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.1.0](https://github.com/batleforc/weebo-stalwart/compare/b5d4b8b99ddad1a435d55cd9a1412dc147ed3a16..v0.1.0) - 2026-10-19
 #### Features
 - weebo-stalwart, the Stalwart operator (RFC 0001, phases 1 and 2) - ([b5d4b8b](https://github.com/batleforc/weebo-stalwart/commit/b5d4b8b99ddad1a435d55cd9a1412dc147ed3a16)) - Max Batleforc, Claude Opus 5.5 (1M context)
