@@ -4,6 +4,15 @@
 //! Stalwart v0.16.27 stores (observed on the image, and checked again by
 //! the live suite), read back, in sync.
 
+// Test helpers outside `#[test]`: a fixture that does not hold fails
+// the test that called it, with its message.
+#![expect(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    reason = "test helpers: a panic is a failed test"
+)]
+
 use adapters_outbound::jmap::SUPPORTED_SCHEMAS;
 use adapters_outbound::{JmapClient, JmapGateway};
 use application::ports::{GatewayError, GatewayFactoryError, RemoteGateway};

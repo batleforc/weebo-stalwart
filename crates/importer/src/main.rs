@@ -114,17 +114,12 @@ async fn main() -> anyhow::Result<()> {
     match (args.apply, kube) {
         (true, Some(kube)) => {
             let summary = apply_all(&kube, &planned, args.force).await;
+            let failed = summary.failed.saturating_add(refused.len());
             eprintln!(
-                "{} linked, {} already linked, {} failed",
-                summary.adopted,
-                summary.skipped,
-                summary.failed + refused.len()
+                "{} linked, {} already linked, {failed} failed",
+                summary.adopted, summary.skipped,
             );
-            anyhow::ensure!(
-                summary.failed == 0 && refused.is_empty(),
-                "{} CR(s) could not be linked",
-                summary.failed + refused.len()
-            );
+            anyhow::ensure!(failed == 0, "{failed} CR(s) could not be linked");
         }
         _ => {
             print!("{}", to_yaml(&planned)?);

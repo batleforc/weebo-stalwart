@@ -52,7 +52,11 @@ pub fn bytes(quantity: &str) -> Result<u64, QuantityError> {
     } else {
         whole.parse().map_err(|_| invalid())?
     };
-    let scale = 10u128.pow(fraction.len() as u32);
+    // At most 18 digits (checked above): 10^18 fits.
+    let scale = u32::try_from(fraction.len())
+        .ok()
+        .and_then(|digits| 10u128.checked_pow(digits))
+        .ok_or_else(invalid)?;
     let fraction: u128 = if fraction.is_empty() {
         0
     } else {
@@ -60,7 +64,10 @@ pub fn bytes(quantity: &str) -> Result<u64, QuantityError> {
     };
     let total = whole
         .checked_mul(multiplier)
-        .and_then(|w| w.checked_add((fraction * multiplier).div_ceil(scale)))
+        .and_then(|w| {
+            let fraction = fraction.checked_mul(multiplier)?.div_ceil(scale);
+            w.checked_add(fraction)
+        })
         .ok_or_else(invalid)?;
     u64::try_from(total).map_err(|_| QuantityError::TooLarge(quantity.to_string()))
 }

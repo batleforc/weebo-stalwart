@@ -6,6 +6,15 @@
 //! secrets for an in-memory store, and the domain, the claims and the
 //! instance's settings read from the cluster (`KubeClusterReader`).
 
+// Test helpers outside `#[test]`: a fixture that does not hold fails
+// the test that called it, with its message.
+#![expect(
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test helpers: a panic is a failed test"
+)]
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -82,7 +91,8 @@ async fn start(
     Arc<FakeGateway>,
     Arc<FakeSecretStore>,
 ) {
-    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    // Err: another test installed it first, which is as good.
+    tracing_subscriber::fmt().with_test_writer().try_init().ok();
     let cluster = testkit::envtest::start().await;
     let client = cluster.client();
     let spec = InstanceSpec {

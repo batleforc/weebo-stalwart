@@ -2,6 +2,15 @@
 //! crates by the `test-support` feature): a Stalwart ([`FakeGateway`]) and
 //! the cluster reads ([`FakeCluster`]).
 
+// Test doubles, outside `#[cfg(test)]` (the `test-support` feature): a
+// poisoned lock or a fixture that doesn't hold fails the test that used
+// it, with its message.
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test doubles: a panic is a failed test"
+)]
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
@@ -298,7 +307,7 @@ impl FakeGateway {
 
     fn next_id(&self) -> String {
         let mut next = self.next_id.lock().unwrap();
-        *next += 1;
+        *next = next.saturating_add(1);
         next.to_string()
     }
 

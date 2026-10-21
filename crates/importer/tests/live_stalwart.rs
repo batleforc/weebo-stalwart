@@ -7,6 +7,10 @@
 //! sending account given an App Password of the operator's (D21, D24) —
 //! the emitted one accepted, Terraform's password left alone.
 
+// Test helpers outside `#[test]`: a fixture that does not hold fails
+// the test that called it, with its message.
+#![expect(clippy::unwrap_used, reason = "test helpers: a panic is a failed test")]
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -53,7 +57,8 @@ where
 #[tokio::test]
 #[ignore = "needs a real Stalwart: task stalwart:container:start"]
 async fn phase_zero_objects_are_linked_and_the_sending_account_rotated() {
-    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    // Err: another test installed it first, which is as good.
+    tracing_subscriber::fmt().with_test_writer().try_init().ok();
     let live = LiveStalwart::from_env();
     let http = JmapClient::client_builder().build().unwrap();
     let gateway = JmapGateway::new(JmapClient::new(&live.url, live.token.clone(), http).unwrap());

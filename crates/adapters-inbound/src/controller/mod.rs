@@ -303,6 +303,10 @@ where
         fields.insert("lastRotation".into(), nonce.clone().into());
     }
     if let Some(instance) = &outcome.instance {
+        #[expect(
+            clippy::expect_used,
+            reason = "a BoundInstance is strings and an enum: serializing it to a Value cannot fail"
+        )]
         let instance = serde_json::to_value(instance).expect("a BoundInstance serializes");
         fields.insert("instance".into(), instance);
     }

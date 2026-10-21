@@ -4,6 +4,15 @@
 //! stores, read back, no drift (the live suite checks the same against
 //! the real image).
 
+// Test helpers outside `#[test]`: a fixture that does not hold fails
+// the test that called it, with its message.
+#![expect(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    reason = "test helpers: a panic is a failed test"
+)]
+
 use adapters_outbound::jmap::{MAX_BODY_BYTES, SUPPORTED_SCHEMAS};
 use adapters_outbound::{JmapClient, JmapGateway};
 use application::ports::{GatewayError, RemoteGateway};

@@ -3,6 +3,10 @@
 //! read the policies live (`KubeClusterReader` as `PolicySource`) — a list
 //! refused by the policies becomes Ready once a rule allows it.
 
+// Test helpers outside `#[test]`: a fixture that does not hold fails
+// the test that called it, with its message.
+#![expect(clippy::unwrap_used, reason = "test helpers: a panic is a failed test")]
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -95,7 +99,8 @@ fn list_status(l: &MailingList) -> Option<&api::Status> {
 
 #[tokio::test]
 async fn policies_report_their_rules_and_gate_the_namespaced_kinds_live() {
-    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    // Err: another test installed it first, which is as good.
+    tracing_subscriber::fmt().with_test_writer().try_init().ok();
     let cluster = testkit::envtest::start().await;
     let client = cluster.client();
     create(

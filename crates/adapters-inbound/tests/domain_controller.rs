@@ -4,6 +4,15 @@
 //! the cluster (`KubeClusterReader`, against StalwartInstances created
 //! here). The template for the other kinds' controller tests.
 
+// Test helpers outside `#[test]`: a fixture that does not hold fails
+// the test that called it, with its message.
+#![expect(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test helpers: a panic is a failed test"
+)]
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -110,7 +119,8 @@ async fn instance(client: &Client, name: &str) {
 
 #[tokio::test]
 async fn domain_lifecycle_creates_stays_quiet_corrects_drift_and_orphans() {
-    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    // Err: another test installed it first, which is as good.
+    tracing_subscriber::fmt().with_test_writer().try_init().ok();
     let cluster = testkit::envtest::start().await;
     let client = cluster.client();
     instance(&client, "main").await;

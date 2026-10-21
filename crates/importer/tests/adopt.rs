@@ -3,6 +3,10 @@
 //! nothing; an object another CR owns on the same server is refused
 //! (`RemoteObjectClaimed`).
 
+// Test helpers outside `#[test]`: a fixture that does not hold fails
+// the test that called it, with its message.
+#![expect(clippy::unwrap_used, reason = "test helpers: a panic is a failed test")]
+
 use api::instance::{InstanceSpec, SecretKeyRef};
 use api::{Account, Domain, ServiceAccount};
 use application::test_support::FakeGateway;

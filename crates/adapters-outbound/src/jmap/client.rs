@@ -116,6 +116,10 @@ impl JmapClient {
     }
 
     /// `{url}/<segments…>`, each segment percent-encoded.
+    #[expect(
+        clippy::expect_used,
+        reason = "`new` refuses a URL that cannot be a base, the only error of `path_segments_mut`"
+    )]
     pub(crate) fn url(&self, segments: &[&str]) -> Url {
         let mut url = self.base.clone();
         url.path_segments_mut()

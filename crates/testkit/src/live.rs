@@ -8,6 +8,16 @@
 //! and `STALWART_SMTP` (`host:port`) are its submission (587, STARTTLS)
 //! and MX (25) listeners, for the SMTP-level tests.
 
+// Test helpers: a live suite without its Stalwart, or with an answer it
+// can't read, fails right there with the reason.
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    reason = "test helpers: a panic is a failed test, with its message"
+)]
+
 use std::collections::BTreeMap;
 use std::path::Path;
 
