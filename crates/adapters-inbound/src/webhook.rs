@@ -95,8 +95,8 @@ impl Admission for WebhookState {
     ) -> Result<(), Denial<ReasonCode>> {
         match kind {
             "StalwartDomain" => {
-                let domain: api::Domain =
-                    typed(object).map_err(|m| Denial::new(ReasonCode::InvalidSpec, m))?;
+                let domain: api::Domain = typed(object)
+                    .map_err(|m| Denial::new(ReasonCode::InvalidSpec, m.to_string()))?;
                 check_domain(&domain).map_err(|f| Denial::new(f.reason, f.message))
             }
             "StalwartServiceAccount" => {
@@ -181,7 +181,7 @@ impl Admission for WebhookState {
 
 /// The typed CR, or a denial: an object that doesn't match its CRD.
 fn parse<K: serde::de::DeserializeOwned>(object: &DynamicObject) -> Result<K, Denial<ReasonCode>> {
-    typed(object).map_err(|m| Denial::new(ReasonCode::InvalidSpec, m))
+    typed(object).map_err(|m| Denial::new(ReasonCode::InvalidSpec, m.to_string()))
 }
 
 impl WebhookState {

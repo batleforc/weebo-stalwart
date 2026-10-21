@@ -125,7 +125,7 @@ impl GatewayFactory for JmapGatewayFactory {
             .instances
             .get(bound)
             .await
-            .map_err(GatewayFactoryError::Kubernetes)?
+            .map_err(|e| GatewayFactoryError::Kubernetes(e.to_string()))?
             .ok_or_else(|| GatewayFactoryError::InstanceNotFound(bound.clone()))?;
         // A local instance's token and CA live in its own namespace.
         let (url, secret_ref, app_password_ref, tls, local) = match &instance {

@@ -119,7 +119,7 @@ async fn apply<K: NamespacedKind>(api: &Api<K>, cr: &K, ctx: &Ctx) -> Result<Act
     super::record_reconcile(K::KIND, started, &outcome);
     super::publish(api, &ctx.recorder, &current, &outcome).await?;
     current.reconciled(&outcome);
-    Ok(super::requeue_after(&outcome))
+    Ok(super::requeue_after(cr, &outcome))
 }
 
 async fn cleanup<K: NamespacedKind>(cr: &K, ctx: &Ctx) -> Result<(), Error> {

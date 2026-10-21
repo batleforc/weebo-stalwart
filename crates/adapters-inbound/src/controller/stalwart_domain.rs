@@ -65,7 +65,7 @@ async fn apply(api: &Api<Domain>, domain: &Domain, ctx: &Ctx) -> Result<Action, 
     };
     super::record_reconcile(KIND, started, &outcome);
     super::publish(api, &ctx.recorder, &current, &outcome).await?;
-    Ok(super::requeue_after(&outcome))
+    Ok(super::requeue_after(domain, &outcome))
 }
 
 /// The instance `domain` lives on: its `instanceRef` resolved (the kit's

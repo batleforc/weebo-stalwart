@@ -190,8 +190,8 @@ where
 
 /// Steady-state drift check after a success, a quick retry after a
 /// failure (both jittered — the kit's).
-pub fn requeue_after(outcome: &Outcome) -> Action {
-    weebo_kit_runtime::controller::requeue_after(outcome.ready.is_ok(), None)
+pub fn requeue_after<K: Resource>(obj: &K, outcome: &Outcome) -> Action {
+    weebo_kit_runtime::controller::requeue_after(obj, outcome.ready.is_ok(), None)
 }
 
 /// The kit's `ReconcileMetrics`. A no-op until the telemetry installs a
