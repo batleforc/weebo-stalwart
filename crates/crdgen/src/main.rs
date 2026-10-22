@@ -11,7 +11,7 @@ use clap::Parser;
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use kube::CustomResourceExt;
 use schemars::JsonSchema;
-use weebo_kit_api::links::{self, GroupKind, KindLinks, Roles};
+use weebo_kit_api::links::{self, GroupKind, KindLinks, Roles, Schematic};
 
 #[derive(Parser)]
 struct Args {
@@ -36,7 +36,9 @@ fn main() -> anyhow::Result<()> {
     write::<api::Account>(out, &roles, &mut kinds)?;
     write::<api::Group>(out, &roles, &mut kinds)?;
     write::<api::MailingList>(out, &roles, &mut kinds)?;
-    let links = serde_json::json!({ "version": 1, "kinds": kinds });
+    // The kit's shared schematic kinds, drawn by the docs' CRD IDE.
+    let schematic: BTreeMap<String, Schematic> = weebo_kit_api::schematic::shared(&roles)?;
+    let links = serde_json::json!({ "version": 1, "kinds": kinds, "schematic": schematic });
     fs::write(
         out.join("links.json"),
         serde_json::to_string_pretty(&links)? + "\n",

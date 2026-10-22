@@ -9,4 +9,11 @@ Add resources, point each reference field (an `instanceRef`, a
 of them writes, and export the whole set as YAML. To start from what runs
 in a cluster, import `kubectl get <kinds> -A -o yaml`.
 
+What lives outside the cluster is drawn too, never exported with the
+manifests: each mail domain and its aliases as DNS names (their MX, SPF
+and DKIM records can be noted on them, `DnsName.records`), the submission
+host clients reach, and the Vault server of an instance's secret store.
+The identity provider accounts log in with is added by hand
+(`OidcIssuer`). The drawing downloads as `schematic.yaml`.
+
 <CrdIde />
