@@ -2,8 +2,8 @@ apiVersion: v2
 name: weebo-stalwart
 description: Kubernetes operator managing Stalwart objects as CRDs.
 type: application
-version: 0.1.2
-appVersion: "0.1.2"
+version: 0.2.0
+appVersion: "0.2.0"
 # Native `preStop: sleep` and the admission/policy APIs used here.
 kubeVersion: ">=1.30.0-0"
 home: https://github.com/batleforc/weebo-stalwart

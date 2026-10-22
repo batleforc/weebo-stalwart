@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.2.0](https://github.com/batleforc/weebo-stalwart/compare/e664915b1b96d33955c3da94972158eb85470cd3..v0.2.0) - 2026-10-22
+#### Features
+- kit v0.23.0, the CRD IDE in the docs (#4) - ([e664915](https://github.com/batleforc/weebo-stalwart/commit/e664915b1b96d33955c3da94972158eb85470cd3)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.1.2](https://github.com/batleforc/weebo-stalwart/compare/049effd0e2c0dc70e923759d45319afec4f3d50b..v0.1.2) - 2026-10-21
 #### Bug Fixes
 - weebo-good-practice review: house lints, bounded I/O, typed errors (#3) - ([049effd](https://github.com/batleforc/weebo-stalwart/commit/049effd0e2c0dc70e923759d45319afec4f3d50b)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
