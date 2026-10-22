@@ -47,6 +47,8 @@ pub struct StalwartDomainSpec {
     /// set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(length(max = 64))]
+    // Drawn by the docs' CRD IDE (the kit's shared schematic kinds).
+    #[schemars(extend("x-weebo-produces" = { "kind": { "group": "schematic.weebo.io", "kind": "DnsName" }, "name": ["."] }))]
     pub aliases: Vec<String>,
     /// Local-part receiving mail sent to an unknown address of the domain
     /// (`<catchAll>@<name>`). Unset: no opinion, the catch-all is left as

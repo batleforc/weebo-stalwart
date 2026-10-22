@@ -78,6 +78,16 @@ ideas behind the fields, start with [Concepts](/docs/concepts).`,
   // The operator reference pages (content/docs/reference/), generated from
   // the Rust sources: reason codes (crates/domain/src/error.rs), Events,
   // metrics & health, resource budget.
+  // A domain's DNS name for the CRD IDE (the kit's shared DnsName):
+  // `spec.name`, else `metadata.name` — the marker of a field cannot fall
+  // back to the object's name. Its aliases are drawn from the api types.
+  links: {
+    StalwartDomain: {
+      produces: [
+        { kind: { group: "schematic.weebo.io", kind: "DnsName" }, name: ["spec.name", "metadata.name"] },
+      ],
+    },
+  },
   reference: {
     metricsPrefix: "weebo_stalwart",
     // The operator's own metrics, beyond the kit's.
