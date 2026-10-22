@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.3.0](https://github.com/batleforc/weebo-stalwart/compare/4d3609abc59f56100c5837782fa12dc4191fe5ac..v0.3.0) - 2026-10-22
+#### Features
+- kit v0.24.0, mail domains, submission host and Vault drawn in the CRD IDE (#5) - ([4d3609a](https://github.com/batleforc/weebo-stalwart/commit/4d3609abc59f56100c5837782fa12dc4191fe5ac)) - Maxime, Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.2.0](https://github.com/batleforc/weebo-stalwart/compare/e664915b1b96d33955c3da94972158eb85470cd3..v0.2.0) - 2026-10-22
 #### Features
 - kit v0.23.0, the CRD IDE in the docs (#4) - ([e664915](https://github.com/batleforc/weebo-stalwart/commit/e664915b1b96d33955c3da94972158eb85470cd3)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
