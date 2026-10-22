@@ -51,6 +51,7 @@ pub struct StalwartAccountSpec {
     /// The `StalwartDomain` (cluster-scoped, by `metadata.name`) the
     /// account's address and aliases are in. It must be `Ready` on the
     /// same instance.
+    #[schemars(extend("x-weebo-link" = { "to": [{ "group": "stalwart.weebo.io", "kind": "StalwartDomain" }] }))]
     pub domain_ref: ObjectRef,
     /// The local-part of the account's address (`<name>@<domain>`),
     /// lowercased: the user's login name at the OpenID Connect provider.

@@ -2,6 +2,9 @@
   "apiVersion": "stalwart.weebo.io/v1alpha1",
   "kind": "StalwartLocalInstance",
   "scope": "Namespaced",
+  "served": [
+    "v1alpha1"
+  ],
   "description": "Connection to one Stalwart server (v0.16), owned by a namespace: its\ntoken is that namespace's, and only its objects use it unless\n`sharedWith` says otherwise. What an operator limited to one namespace\nuses. Objects bound to it are not governed by `StalwartNamespacePolicy`\n(the namespace's own token bounds them) and write their secrets as\nKubernetes `Secret`s only: the operator's Vault identity is shared by\nevery namespace. `Ready` tells whether the server answers with the\ntoken below and speaks a supported management schema.",
   "properties": {
     "appPasswordTokenSecretRef": {

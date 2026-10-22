@@ -51,6 +51,7 @@ pub struct StalwartServiceAccountSpec {
     /// The `StalwartDomain` (cluster-scoped, by `metadata.name`) the
     /// account's address and aliases are in. It must be `Ready` on the
     /// same instance.
+    #[schemars(extend("x-weebo-link" = { "to": [{ "group": "stalwart.weebo.io", "kind": "StalwartDomain" }] }))]
     pub domain_ref: ObjectRef,
     /// The local-part of the account's address (`<name>@<domain>`),
     /// lowercased. Defaults to the CR's `metadata.name`. Changing it moves
@@ -75,6 +76,8 @@ pub struct StalwartServiceAccountSpec {
     /// role may write.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(length(max = 8))]
+    // The keys each target holds, for the docs' CRD IDE (as `reconcile_service_account::credentials` writes them).
+    #[schemars(extend("x-weebo-keys" = ["host", "port", "security", "username", "password", "from"]))]
     pub secret_targets: Vec<SecretTarget>,
     /// `Delete` (default): deleting the CR deletes the account and the
     /// secrets it wrote. `Orphan`: both are left in place.

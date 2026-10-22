@@ -2,6 +2,9 @@
   "apiVersion": "stalwart.weebo.io/v1alpha1",
   "kind": "StalwartMailingList",
   "scope": "Namespaced",
+  "served": [
+    "v1alpha1"
+  ],
   "description": "A mailing list (`x:MailingList`): an address relaying every message to\nits recipients — addresses, or the `StalwartAccount`s of this\nnamespace. Compared on every reconcile, recipients as a set, and\nwritten only when it drifted.",
   "properties": {
     "aliases": {

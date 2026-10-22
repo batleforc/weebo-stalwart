@@ -36,6 +36,7 @@ pub struct StalwartMailingListSpec {
     pub instance_ref: Option<InstanceRef>,
     /// The `StalwartDomain` (cluster-scoped, by `metadata.name`) the list's
     /// address and aliases are in. It must be `Ready` on the same instance.
+    #[schemars(extend("x-weebo-link" = { "to": [{ "group": "stalwart.weebo.io", "kind": "StalwartDomain" }] }))]
     pub domain_ref: ObjectRef,
     /// The local-part of the list's address, lowercased. Defaults to the
     /// CR's `metadata.name`. Changing it moves the address: only applied
@@ -76,6 +77,7 @@ pub struct Recipient {
     /// A `StalwartAccount` of this namespace: its confirmed address
     /// (`status.address`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-weebo-link" = { "to": [{ "group": "stalwart.weebo.io", "kind": "StalwartAccount" }] }))]
     pub account_ref: Option<ObjectRef>,
 }
 

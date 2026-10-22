@@ -2,6 +2,9 @@
   "apiVersion": "stalwart.weebo.io/v1alpha1",
   "kind": "StalwartInstance",
   "scope": "Cluster",
+  "served": [
+    "v1alpha1"
+  ],
   "description": "Connection to one Stalwart server (v0.16). Cluster-scoped: an org-wide\npiece of infrastructure, not owned by a namespace (a namespace's own\nserver is a `StalwartLocalInstance`). `Ready` tells whether the server\nanswers with the token below and speaks a management schema this\noperator release supports.",
   "properties": {
     "appPasswordTokenSecretRef": {
